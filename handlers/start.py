@@ -4,7 +4,7 @@ from telegram.ext import ContextTypes
 from keyboards import get_main_menu_keyboard
 
 
-async def start(update: update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     welcome_text = (
         f"👋 Welcome, {user.first_name}!\n\n"
