@@ -132,10 +132,21 @@ fi
 
 # ─── 5. Copy Source to Install Path ──────────────────────────────────
 
+# Back up existing database files before overwriting
+DB_FILES=()
 if [[ -d "$INSTALL_DIR" ]]; then
-    BACKUP_DIR="${INSTALL_DIR}.bak.$(date +%Y%m%d%H%M%S)"
-    log_warn "Install directory exists. Backing up to $BACKUP_DIR"
-    mv "$INSTALL_DIR" "$BACKUP_DIR"
+    while IFS= read -r -d '' db; do
+        DB_FILES+=("$db")
+    done < <(find "$INSTALL_DIR" -maxdepth 1 -type f \( -name "*.db" -o -name "*.sqlite3" -o -name "*.sqlite" \) -print0 2>/dev/null)
+fi
+
+if [[ ${#DB_FILES[@]} -gt 0 ]]; then
+    BACKUP_DIR="/tmp/vardenproxybot_db_backup_$(date +%Y%m%d%H%M%S)"
+    mkdir -p "$BACKUP_DIR"
+    for db in "${DB_FILES[@]}"; do
+        cp "$db" "$BACKUP_DIR/"
+        log_info "Backed up: $(basename "$db") → $BACKUP_DIR"
+    done
 fi
 
 log_info "Copying source to $INSTALL_DIR ..."
@@ -148,6 +159,15 @@ rm -rf "$INSTALL_DIR"/__pycache__ "$INSTALL_DIR"/handlers/__pycache__
 rm -f "$INSTALL_DIR"/*.pyc "$INSTALL_DIR"/handlers/*.pyc 2>/dev/null || true
 rm -f "$INSTALL_DIR"/install.sh 2>/dev/null || true
 rm -f "$INSTALL_DIR"/vardenproxy.db 2>/dev/null || true
+
+# Restore backed-up database files
+if [[ ${#DB_FILES[@]} -gt 0 ]]; then
+    for db in "${DB_FILES[@]}"; do
+        cp "$BACKUP_DIR/$(basename "$db")" "$INSTALL_DIR/"
+        log_info "Restored: $(basename "$db")"
+    done
+    rm -rf "$BACKUP_DIR"
+fi
 
 chown -R "$CURRENT_USER:$CURRENT_GROUP" "$INSTALL_DIR"
 log_info "Source copied and cleaned."
