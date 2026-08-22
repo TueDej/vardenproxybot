@@ -5,6 +5,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
 )
+from telegram.request import HTTPXRequest
 
 from config import config
 from database import init_db
@@ -35,12 +36,32 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _build_request() -> HTTPXRequest:
+    """Create HTTPXRequest configured with SOCKS5 proxy and timeouts."""
+    kwargs = {
+        "connect_timeout": 15.0,
+        "read_timeout": 20.0,
+    }
+    proxy_url = config.proxy_url
+    if proxy_url:
+        kwargs["proxy"] = proxy_url
+    return HTTPXRequest(**kwargs)
+
+
 def main():
     if not config.bot_token:
         print("ERROR: BOT_TOKEN is not set in .env")
         return
 
-    app = Application.builder().token(config.bot_token).build()
+    request = _build_request()
+
+    app = (
+        Application.builder()
+        .token(config.bot_token)
+        .request(request)
+        .get_updates_request(request)
+        .build()
+    )
 
     # Commands
     app.add_handler(CommandHandler("start", start))
@@ -60,6 +81,8 @@ def main():
     app.add_handler(CallbackQueryHandler(help_command, pattern="^help$"))
 
     print("🤖 Bot is running...")
+    if config.proxy_url:
+        print(f"🧦 Proxy: {config.proxy_url}")
     app.run_polling()
 
 
