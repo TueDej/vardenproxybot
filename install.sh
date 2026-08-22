@@ -159,14 +159,21 @@ python3 -m venv "$INSTALL_DIR/venv"
 chown -R "$CURRENT_USER:$CURRENT_GROUP" "$INSTALL_DIR/venv"
 
 log_info "Upgrading pip..."
-"$INSTALL_DIR/venv/bin/pip" install --upgrade pip --quiet
+"$INSTALL_DIR/venv/bin/pip" install --upgrade pip
 
 log_info "Installing Python dependencies..."
-if ! "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" --quiet; then
+if ! "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"; then
     log_error "pip install failed. Check $INSTALL_DIR/requirements.txt and network connectivity."
     exit 1
 fi
-log_info "Dependencies installed."
+
+# Verify key packages are importable
+log_info "Verifying package imports..."
+if ! "$INSTALL_DIR/venv/bin/python" -c "import telegram; import sqlalchemy; import aiosqlite; print('telegram', telegram.__version__)"; then
+    log_error "Package verification failed. The venv may be broken."
+    exit 1
+fi
+log_info "Dependencies installed and verified."
 
 # ─── 7. Write Systemd Unit ───────────────────────────────────────────
 
