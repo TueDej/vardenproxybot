@@ -25,10 +25,10 @@ from keyboards import get_main_menu_keyboard
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    keyboard = InlineKeyboardMarkup(
+    keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
         for row in get_main_menu_keyboard()
-    )
+    ])
     await query.edit_message_text(
         "🏠 <b>Main Menu</b>\n\nSelect an option:",
         reply_markup=keyboard,

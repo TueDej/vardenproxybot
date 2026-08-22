@@ -22,10 +22,10 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not user:
             await query.edit_message_text(
                 "❌ You don't have an account yet. Use /start first.",
-                reply_markup=InlineKeyboardMarkup(
+                reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
                     for row in get_back_to_menu_keyboard()
-                ),
+                ]),
             )
             return
 
@@ -54,8 +54,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text += "\n<i>No active subscriptions.</i>"
 
-    keyboard = InlineKeyboardMarkup(
+    keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
         for row in get_back_to_menu_keyboard()
-    )
+    ])
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode="HTML")

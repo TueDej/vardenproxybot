@@ -14,10 +14,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ℹ️ <b>Help / Support</b> — get assistance from our team.\n\n"
         "Select an option below to get started:"
     )
-    keyboard = InlineKeyboardMarkup(
+    keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
         for row in get_main_menu_keyboard()
-    )
+    ])
     await update.message.reply_text(welcome_text, reply_markup=keyboard, parse_mode="HTML")
 
 
@@ -29,8 +29,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Use <b>👤 My Profile</b> to view your active subscriptions.\n\n"
         "📩 For support, contact: @VardenProxySupport"
     )
-    keyboard = InlineKeyboardMarkup(
+    keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
         for row in get_main_menu_keyboard()
-    )
+    ])
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")

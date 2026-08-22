@@ -30,10 +30,10 @@ async def _get_or_create_user(session, telegram_user) -> User:
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    keyboard = InlineKeyboardMarkup(
+    keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
         for row in get_packages_keyboard(PACKAGES)
-    )
+    ])
     await query.edit_message_text(
         "🛒 <b>Select a Package</b>\n\nChoose your desired data allowance:",
         reply_markup=keyboard,
@@ -51,10 +51,10 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     context.user_data["selected_package"] = pkg
-    keyboard = InlineKeyboardMarkup(
+    keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
         for row in get_durations_keyboard(pkg_id, DURATIONS)
-    )
+    ])
     await query.edit_message_text(
         f"📦 <b>{pkg['label']}</b> selected.\n\nChoose subscription duration:",
         reply_markup=keyboard,
@@ -103,10 +103,10 @@ async def duration_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚠️ <i>This is a demo. No real payment is processed.</i>\n\n"
         "Click <b>✅ I have paid</b> when ready:"
     )
-    keyboard = InlineKeyboardMarkup(
+    keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
         for row in get_payment_keyboard(order.id)
-    )
+    ])
     await query.edit_message_text(payment_text, reply_markup=keyboard, parse_mode="HTML")
 
 
@@ -130,10 +130,10 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✅ <b>Payment Confirmed!</b>\n\n"
                 f"Order #{order.id} has been approved.\n"
                 f"Your VPN config is ready — check <b>👤 My Profile</b>.",
-                reply_markup=InlineKeyboardMarkup(
+                reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
                     for row in get_back_to_menu_keyboard()
-                ),
+                ]),
                 parse_mode="HTML",
             )
         else:
@@ -141,10 +141,10 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"⏳ <b>Order #{order.id} Submitted</b>\n\n"
                 "Your payment is pending admin approval.\n"
                 "You will be notified once confirmed.",
-                reply_markup=InlineKeyboardMarkup(
+                reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
                     for row in get_back_to_menu_keyboard()
-                ),
+                ]),
                 parse_mode="HTML",
             )
 
@@ -164,10 +164,10 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(
         f"❌ Order #{order_id} cancelled.",
-        reply_markup=InlineKeyboardMarkup(
+        reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
             for row in get_back_to_menu_keyboard()
-        ),
+        ]),
         parse_mode="HTML",
     )
 
