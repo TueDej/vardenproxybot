@@ -2,6 +2,7 @@ import asyncio
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 import httpx
 
@@ -9,6 +10,7 @@ from config import config
 
 CLIENTS_API = "/panel/api/clients"
 INBOUNDS_API = "/panel/api/inbounds"
+SETTINGS_API = "/panel/api/setting"
 
 
 class VPNPanelError(Exception):
@@ -47,15 +49,53 @@ def normalize_links(obj) -> list[str]:
 class VPNPanelService:
     """Async client for the 3x-ui v3.x REST API (Bearer token auth)."""
 
+    _settings_cache: dict | None = None
+
     @staticmethod
     def is_configured() -> bool:
         return config.panel_configured
 
-    @staticmethod
-    def subscription_url(sub_id: str | None) -> str:
-        if not sub_id or not config.subscription_base_url:
+    @classmethod
+    async def all_settings(cls) -> dict:
+        """Fetch (and cache) the panel's AllSetting object."""
+        if cls._settings_cache is not None:
+            return cls._settings_cache
+        for suffix in ("", "/list"):
+            try:
+                obj = await cls._request("GET", f"{SETTINGS_API}{suffix}", retries=1)
+            except Exception:
+                continue
+            if isinstance(obj, dict) and obj:
+                cls._settings_cache = obj
+                break
+        else:
+            cls._settings_cache = {}
+        return cls._settings_cache
+
+    @classmethod
+    async def subscription_url(cls, sub_id: str | None) -> str:
+        """Build the public subscription URL.
+
+        Priority:
+          1. SUBSCRIPTION_BASE_URL env override — used verbatim + '/sub/<id>'
+          2. Panel's own subscription settings (subTLS/subDomain/subPort/subPath),
+             so custom paths like /zub/ are respected automatically.
+        """
+        if not sub_id:
             return ""
-        return f"{config.subscription_base_url}/sub/{sub_id}"
+        if config.subscription_base_url:
+            return f"{config.subscription_base_url}/sub/{sub_id}"
+        settings = await cls.all_settings()
+        if not settings:
+            return ""
+        scheme = "https" if settings.get("subTLS") else "http"
+        host = settings.get("subDomain") or urlparse(config.panel_url).hostname or ""
+        port = settings.get("subPort")
+        path = settings.get("subPath") or "/sub/"
+        netloc = f"{host}:{port}" if port else host
+        if not netloc:
+            return ""
+        return f"{scheme}://{netloc}{path}{sub_id}"
 
     @classmethod
     async def _request(

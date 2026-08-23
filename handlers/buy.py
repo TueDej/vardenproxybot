@@ -175,10 +175,9 @@ async def _approve_order(session, order: Order) -> Subscription:
     return subscription
 
 
-def format_vpn_config(sub: Subscription) -> str:
+def format_vpn_config(sub: Subscription, sub_url: str = "") -> str:
     """Format the config block (vless URIs + subscription URL) for a message."""
     lines = [f"🔗 <code>{link}</code>" for link in sub.vpn_config.splitlines() if link]
-    sub_url = VPNPanelService.subscription_url(sub.sub_id)
     if sub_url:
         lines.append(f"📡 Subscription: <code>{sub_url}</code>")
     return "\n".join(lines)

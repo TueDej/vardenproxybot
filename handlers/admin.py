@@ -50,10 +50,11 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        sub_url = await VPNPanelService.subscription_url(subscription.sub_id)
         await update.message.reply_text(
             f"✅ Order #{order_id} approved.\n"
             f"📦 {order.package_label} | {order.duration_days} days\n"
-            f"{format_vpn_config(subscription)}",
+            f"{format_vpn_config(subscription, sub_url)}",
             parse_mode="HTML",
         )
 
@@ -64,7 +65,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=(
                     f"🎉 <b>Your order #{order_id} has been approved!</b>\n\n"
                     f"📦 Package: {order.package_label}\n"
-                    f"{format_vpn_config(subscription)}\n\n"
+                    f"{format_vpn_config(subscription, sub_url)}\n\n"
                     "Import the vless:// link into your V2Ray/Nekoray/Streisand app, "
                     "or paste the subscription URL into its 'add subscription' field."
                 ),

@@ -54,12 +54,12 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for i, sub in enumerate(active_subs, 1):
                 expires = sub.expires_at if sub.expires_at.tzinfo else sub.expires_at.replace(tzinfo=timezone.utc)
                 remaining = (expires - now).days
-                sub_url = VPNPanelService.subscription_url(sub.sub_id)
+                sub_url = await VPNPanelService.subscription_url(sub.sub_id)
                 text += (
                     f"\n─── #{i} ───\n"
                     f"📦 {sub.package_label} | {sub.data_gb}GB | {sub.duration_days}d\n"
                     f"⏳ Expires: {expires.strftime('%Y-%m-%d')} ({remaining}d left)\n"
-                    f"{config_block(sub)}"
+                    f"{config_block(sub, sub_url)}"
                 )
         else:
             text += "\n<i>No active subscriptions.</i>"
