@@ -189,6 +189,21 @@ class VPNPanelService:
             return False
 
     @classmethod
+    async def get_inbound_client_emails(cls) -> set[str]:
+        """Emails of all clients currently attached to the configured inbound."""
+        inbound = await cls._request("GET", f"{INBOUNDS_API}/get/{config.xui_inbound_id}")
+        clients = (inbound or {}).get("settings", {}).get("clients", [])
+        return {c["email"] for c in clients if isinstance(c, dict) and c.get("email")}
+
+    @classmethod
+    async def get_online_emails(cls) -> set[str]:
+        """Emails of clients with an active connection right now."""
+        online = await cls._request("GET", f"{CLIENTS_API}/onlines")
+        if isinstance(online, list):
+            return {e for e in online if isinstance(e, str)}
+        return set()
+
+    @classmethod
     async def get_server_status(cls) -> dict:
         status = {
             "server": config.panel_url,
