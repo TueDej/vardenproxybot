@@ -14,13 +14,13 @@ def _format_links_block(links: list[str], sub_url: str) -> str:
     lines = []
     if sub_url:
         lines.append("📡 <b>Subscription URL:</b>")
-        lines.append(f"<code>{sub_url}</code>")
+        lines.append(f"<pre><code>{sub_url}</code></pre>")
     if links:
         if lines:
             lines.append("")
         lines.append("🔗 <b>Config links:</b>")
         for link in links:
-            lines.append(f"<code>{link}</code>")
+            lines.append(f"<pre><code>{link}</code></pre>")
     return "\n".join(lines)
 
 
