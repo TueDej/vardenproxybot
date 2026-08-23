@@ -65,12 +65,13 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["order_id"] = order.id
 
+    separator = "─" * 20
     payment_text = (
         f"💳 <b>Order #{order.id}</b>\n\n"
         f"📦 Package: {pkg['label']}\n"
         f"📅 Duration: 1 Month\n"
         f"💰 Amount: <b>{pkg['price']:,} Toomans</b>\n\n"
-        "─" * 20 + "\n"
+        f"{separator}\n"
         "🏦 <b>Mock Payment Details</b>\n\n"
         f"💳 Card: <code>{config.mock_card_number}</code>\n"
         f"👤 Holder: {config.mock_card_holder}\n"
