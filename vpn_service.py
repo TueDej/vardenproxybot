@@ -240,8 +240,15 @@ class VPNPanelService:
 
     @classmethod
     async def get_online_emails(cls) -> set[str]:
-        """Emails of clients with an active connection right now."""
-        online = await cls._request("GET", f"{CLIENTS_API}/onlines")
+        """Emails of clients with an active connection right now.
+
+        Returns an empty set if the /onlines endpoint is unavailable
+        (e.g. older panel versions) — online status is non-critical.
+        """
+        try:
+            online = await cls._request("GET", f"{CLIENTS_API}/onlines")
+        except VPNPanelError:
+            return set()
         if isinstance(online, list):
             return {e for e in online if isinstance(e, str)}
         return set()
@@ -258,6 +265,9 @@ class VPNPanelService:
             online = await cls._request("GET", f"{CLIENTS_API}/onlines")
             if isinstance(online, list):
                 status["online_users"] = len(online)
+        except VPNPanelError:
+            pass  # /onlines unavailable on this panel version
+        try:
             inbound = await cls._request("GET", f"{INBOUNDS_API}/get/{config.xui_inbound_id}")
             clients = (inbound or {}).get("settings", {}).get("clients", [])
             status["inbound_clients"] = len(clients)
