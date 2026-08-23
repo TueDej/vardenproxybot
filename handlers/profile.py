@@ -10,17 +10,11 @@ from models import User
 from vpn_service import VPNPanelError, VPNPanelService
 
 
-def _format_links_block(links: list[str], sub_url: str, sub_links: list[str]) -> str:
+def _format_links_block(links: list[str], sub_url: str) -> str:
     lines = []
     if sub_url:
         lines.append("📡 <b>Subscription URL:</b>")
         lines.append(f"<code>{sub_url}</code>")
-    if sub_links:
-        if lines:
-            lines.append("")
-        lines.append("📡 <b>Subscription links:</b>")
-        for link in sub_links:
-            lines.append(f"<code>{link}</code>")
     if links:
         if lines:
             lines.append("")
@@ -88,7 +82,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"\n─── #{i} ───\n"
                     f"📦 {data_label} | {c['limit_ip']} device(s){online_tag}\n"
                     f"⏳ Expires: {expiry_dt.strftime('%Y-%m-%d')} ({remaining}d left)\n"
-                    f"{_format_links_block(c['links'], c['subscription_url'], c['sub_links'])}"
+                    f"{_format_links_block(c['links'], c['subscription_url'])}"
                 )
         else:
             text += "\n<i>No active subscriptions.</i>"
