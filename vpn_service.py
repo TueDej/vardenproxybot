@@ -203,16 +203,18 @@ class VPNPanelService:
 
     @classmethod
     async def get_clients_by_telegram_id(cls, telegram_id: int) -> list[dict]:
-        """Return all panel clients for a user, fetched via the tgId API.
+        """Return all panel clients for a user, fetched from the inbound.
 
         Each dict has: email, sub_id, enable, expiry_time, total_gb,
         limit_ip, links, subscription_url, sub_links
         """
-        data = await cls._request("GET", f"{CLIENTS_API}/get/tgId/{telegram_id}")
-        raw_clients = data if isinstance(data, list) else []
+        inbound = await cls._request("GET", f"{INBOUNDS_API}/get/{config.xui_inbound_id}")
+        settings_clients = (inbound or {}).get("settings", {}).get("clients", [])
         results = []
-        for c in raw_clients:
+        for c in settings_clients:
             if not isinstance(c, dict):
+                continue
+            if str(c.get("tgId")) != str(telegram_id):
                 continue
             email = c.get("email", "")
             sub_id = c.get("subId", "")
