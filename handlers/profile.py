@@ -24,6 +24,18 @@ def _format_links_block(links: list[str], sub_url: str) -> str:
     return "\n".join(lines)
 
 
+def _format_product_message(c: dict, expiry_dt: datetime, online_emails: set) -> str:
+    now = datetime.now(timezone.utc)
+    remaining = (expiry_dt - now).days
+    online_tag = " 🟢 <i>online</i>" if c["email"] in online_emails else ""
+    data_label = "Unlimited" if c["total_gb"] == 0 else f"{c['total_gb'] // (1024**3)}GB"
+    return (
+        f"📦 {data_label} | {c['limit_ip']} device(s){online_tag}\n"
+        f"⏳ Expires: {expiry_dt.strftime('%Y-%m-%d')} ({remaining}d left)\n"
+        f"{_format_links_block(c['links'], c['subscription_url'])}"
+    )
+
+
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = update.effective_user.id
     async with async_session() as session:
@@ -74,17 +86,15 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"📦 <b>Active Subscriptions:</b> {len(active)}\n"
 
         if active:
-            for i, (c, expiry_dt) in enumerate(active, 1):
-                remaining = (expiry_dt - now).days
-                online_tag = " 🟢 <i>online</i>" if c["email"] in online_emails else ""
-                data_label = "Unlimited" if c["total_gb"] == 0 else f"{c['total_gb'] // (1024**3)}GB"
-                text += (
-                    f"\n─── #{i} ───\n"
-                    f"📦 {data_label} | {c['limit_ip']} device(s){online_tag}\n"
-                    f"⏳ Expires: {expiry_dt.strftime('%Y-%m-%d')} ({remaining}d left)\n"
-                    f"{_format_links_block(c['links'], c['subscription_url'])}"
-                )
+            text += "\n<i>Details in the messages below:</i>"
         else:
             text += "\n<i>No active subscriptions.</i>"
 
     await update.message.reply_text(text, reply_markup=back_keyboard(), parse_mode="HTML")
+
+    if active:
+        for c, expiry_dt in active:
+            await update.message.reply_text(
+                _format_product_message(c, expiry_dt, online_emails),
+                parse_mode="HTML",
+            )
