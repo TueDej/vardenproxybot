@@ -1,12 +1,10 @@
-from datetime import datetime, timedelta, timezone
-
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
 from keyboards import back_keyboard, packages_keyboard, payment_keyboard
-from models import Order, Subscription, User
+from models import Order, User
 from packages import DURATION_DAYS, PACKAGES
 from vpn_service import VPNPanelError, VPNPanelService
 
@@ -96,7 +94,6 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Order not found.")
             return
 
-        # Capture before approval: a rollback expires the ORM object
         order_id = order.id
 
         if config.auto_approve:
@@ -152,32 +149,19 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def _approve_order(session, order: Order) -> Subscription:
+async def _approve_order(session, order: Order) -> dict:
+    """Create the client on the panel. Returns the panel result dict."""
     from sqlalchemy import select
-
     result = await session.execute(select(User).where(User.id == order.user_id))
     user = result.scalar_one()
     panel = await VPNPanelService.create_client(user.telegram_id, order.duration_days, order.data_gb)
-    subscription = Subscription(
-        user_id=order.user_id,
-        package_label=order.package_label,
-        duration_days=order.duration_days,
-        data_gb=order.data_gb,
-        vpn_config="\n".join(panel["links"]),
-        xui_email=panel["email"],
-        sub_id=panel["sub_id"],
-        is_active=True,
-        expires_at=datetime.now(timezone.utc) + timedelta(days=order.duration_days),
-    )
-    session.add(subscription)
     await session.commit()
-    await session.refresh(subscription)
-    return subscription
+    return panel
 
 
-def format_vpn_config(sub: Subscription, sub_url: str = "") -> str:
+def format_vpn_config(links: list[str], sub_url: str = "") -> str:
     """Format the config block (vless URIs + subscription URL) for a message."""
-    lines = [f"🔗 <code>{link}</code>" for link in sub.vpn_config.splitlines() if link]
+    lines = [f"🔗 <code>{link}</code>" for link in links if link]
     if sub_url:
         lines.append(f"📡 Subscription: <code>{sub_url}</code>")
     return "\n".join(lines)

@@ -1,12 +1,10 @@
-from datetime import timedelta, timezone
-
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
 from handlers.buy import _approve_order, format_vpn_config
-from models import Order, Subscription
+from models import Order
 from vpn_service import VPNPanelError, VPNPanelService
 
 
@@ -41,7 +39,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         order.status = "approved"
         try:
-            subscription = await _approve_order(session, order)
+            panel = await _approve_order(session, order)
         except VPNPanelError as exc:
             await session.rollback()
             await update.message.reply_text(
@@ -50,11 +48,11 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        sub_url = await VPNPanelService.subscription_url(subscription.sub_id)
+        sub_url = await VPNPanelService.subscription_url(panel["sub_id"])
         await update.message.reply_text(
             f"✅ Order #{order_id} approved.\n"
             f"📦 {order.package_label} | {order.duration_days} days\n"
-            f"{format_vpn_config(subscription, sub_url)}",
+            f"{format_vpn_config(panel['links'], sub_url)}",
             parse_mode="HTML",
         )
 
@@ -65,7 +63,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=(
                     f"🎉 <b>Your order #{order_id} has been approved!</b>\n\n"
                     f"📦 Package: {order.package_label}\n"
-                    f"{format_vpn_config(subscription, sub_url)}\n\n"
+                    f"{format_vpn_config(panel['links'], sub_url)}\n\n"
                     "Import the vless:// link into your V2Ray/Nekoray/Streisand app, "
                     "or paste the subscription URL into its 'add subscription' field."
                 ),

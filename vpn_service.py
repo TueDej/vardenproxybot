@@ -197,6 +197,48 @@ class VPNPanelService:
         return {c["email"] for c in clients if isinstance(c, dict) and c.get("email")}
 
     @classmethod
+    async def get_clients_by_telegram_id(cls, telegram_id: int) -> list[dict]:
+        """Return all panel clients for a user, fetched live from the inbound.
+
+        Each dict has: email, sub_id, enable, expiry_time, total_gb, links, subscription_url
+        """
+        inbound = await cls._request("GET", f"{INBOUNDS_API}/get/{config.xui_inbound_id}")
+        settings_clients = (inbound or {}).get("settings", {}).get("clients", [])
+        results = []
+        for c in settings_clients:
+            if not isinstance(c, dict):
+                continue
+            if c.get("tgId") != telegram_id:
+                continue
+            email = c.get("email", "")
+            sub_id = c.get("subId", "")
+            links = await cls.get_client_links(email)
+            sub_url = await cls.subscription_url(sub_id) if sub_id else ""
+            results.append(
+                {
+                    "email": email,
+                    "sub_id": sub_id,
+                    "enable": c.get("enable", True),
+                    "expiry_time": c.get("expiryTime", 0),
+                    "total_gb": c.get("totalGB", 0),
+                    "limit_ip": c.get("limitIp", 0),
+                    "links": links,
+                    "subscription_url": sub_url,
+                }
+            )
+        return results
+
+    @classmethod
+    async def get_client_links(cls, email: str) -> list[str]:
+        """Fetch config links for a client by email."""
+        if not email:
+            return []
+        try:
+            return normalize_links(await cls._request("GET", f"{CLIENTS_API}/links/{email}"))
+        except VPNPanelError:
+            return []
+
+    @classmethod
     async def get_online_emails(cls) -> set[str]:
         """Emails of clients with an active connection right now."""
         online = await cls._request("GET", f"{CLIENTS_API}/onlines")

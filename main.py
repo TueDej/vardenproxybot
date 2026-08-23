@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -21,7 +19,6 @@ from handlers.buy import (
 )
 from handlers.profile import profile
 from handlers.start import help_command, start
-from models import Subscription
 from vpn_service import VPNPanelService
 
 
@@ -66,29 +63,6 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❓ Unknown option. Use the keyboard buttons below.")
 
 
-async def cleanup_expired_subscriptions(context: ContextTypes.DEFAULT_TYPE):
-    """Delete expired clients from the panel and flag their subscriptions inactive."""
-    now = datetime.now(timezone.utc)
-    async with async_session() as session:
-        from sqlalchemy import select
-
-        result = await session.execute(
-            select(Subscription).where(Subscription.is_active == True)  # noqa: E712
-        )
-        subs = result.scalars().all()
-        removed = 0
-        for sub in subs:
-            expires = sub.expires_at if sub.expires_at.tzinfo else sub.expires_at.replace(tzinfo=timezone.utc)
-            if expires > now:
-                continue
-            sub.is_active = False
-            if sub.xui_email and await VPNPanelService.delete_client(sub.xui_email):
-                removed += 1
-        await session.commit()
-    if removed:
-        print(f"🧹 Removed {removed} expired panel client(s).")
-
-
 def main():
     if not config.bot_token:
         print("ERROR: BOT_TOKEN is not set in .env")
@@ -122,12 +96,6 @@ def main():
 
     # Text messages (reply keyboard)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
-
-    # Hourly cleanup of expired panel clients
-    if app.job_queue:
-        app.job_queue.run_repeating(cleanup_expired_subscriptions, interval=3600, first=30)
-    else:
-        print("WARN: job-queue extra not installed; expired clients won't be auto-removed.")
 
     print("🤖 Bot is running...")
     if config.proxy_url:

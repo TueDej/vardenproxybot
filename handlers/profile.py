@@ -5,18 +5,23 @@ from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
-from handlers.buy import format_vpn_config as config_block
 from keyboards import back_keyboard, main_menu_keyboard
-from models import Subscription, User
+from models import User
 from vpn_service import VPNPanelError, VPNPanelService
 
 
+def _format_links_block(links: list[str], sub_url: str) -> str:
+    lines = [f"🔗 <code>{link}</code>" for link in links if link]
+    if sub_url:
+        lines.append(f"📡 Subscription: <code>{sub_url}</code>")
+    return "\n".join(lines)
+
+
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
     async with async_session() as session:
         from sqlalchemy import select
-        result = await session.execute(
-            select(User).where(User.telegram_id == update.effective_user.id)
-        )
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
 
         if not user:
@@ -28,65 +33,49 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        now = datetime.now(timezone.utc)
-        active_subs: list[Subscription] = []
-        expired_subs: list[Subscription] = []
-        for s in user.subscriptions:
-            if not s.is_active:
-                continue
-            expires = s.expires_at if s.expires_at.tzinfo else s.expires_at.replace(tzinfo=timezone.utc)
-            (active_subs if expires > now else expired_subs).append(s)
-
-        # Lazily flag panel-expired subscriptions as inactive
-        if expired_subs:
-            for s in expired_subs:
-                s.is_active = False
-            await session.commit()
-
-        # Cross-check against the live panel: subs whose client was deleted
-        # (manually or otherwise) — and pre-panel demo rows without xui_email —
-        # are deactivated here. Fail open on panel errors.
-        removed_count = 0
-        online_emails: set[str] = set()
-        if config.panel_configured and active_subs:
-            try:
-                panel_emails = await VPNPanelService.get_inbound_client_emails()
-                online_emails = await VPNPanelService.get_online_emails()
-                for s in list(active_subs):
-                    gone = not s.xui_email or s.xui_email not in panel_emails
-                    if gone:
-                        reason = "deleted from panel" if s.xui_email else "legacy entry (pre-panel)"
-                        print(f"INFO: deactivating subscription #{s.id} ({s.xui_email}): {reason}")
-                        s.is_active = False
-                        active_subs.remove(s)
-                        removed_count += 1
-                if removed_count:
-                    await session.commit()
-            except VPNPanelError:
-                pass  # panel down — show what we have rather than nothing
-
         text = (
             f"👤 <b>Profile</b>\n\n"
             f"🆔 User ID: <code>{user.telegram_id}</code>\n"
             f"📛 Name: {user.first_name}\n"
             f"📅 Member since: {user.created_at.strftime('%Y-%m-%d')}\n\n"
-            f"📦 <b>Active Subscriptions:</b> {len(active_subs)}\n"
         )
 
-        if removed_count:
-            text += f"⚠️ {removed_count} subscription(s) no longer exist on the server and were removed.\n"
+        if not config.panel_configured:
+            text += "<i>Panel not configured.</i>"
+            await update.message.reply_text(text, reply_markup=back_keyboard(), parse_mode="HTML")
+            return
 
-        if active_subs:
-            for i, sub in enumerate(active_subs, 1):
-                expires = sub.expires_at if sub.expires_at.tzinfo else sub.expires_at.replace(tzinfo=timezone.utc)
-                remaining = (expires - now).days
-                sub_url = await VPNPanelService.subscription_url(sub.sub_id)
-                status = " 🟢 <i>online</i>" if sub.xui_email and sub.xui_email in online_emails else ""
+        try:
+            clients = await VPNPanelService.get_clients_by_telegram_id(telegram_id)
+        except VPNPanelError as exc:
+            text += f"<i>Panel error: {exc}</i>"
+            await update.message.reply_text(text, reply_markup=back_keyboard(), parse_mode="HTML")
+            return
+
+        now = datetime.now(timezone.utc)
+        online_emails = await VPNPanelService.get_online_emails()
+
+        # Filter to enabled + not expired
+        active = []
+        for c in clients:
+            if not c["enable"]:
+                continue
+            expiry_dt = datetime.fromtimestamp(c["expiry_time"] / 1000, tz=timezone.utc)
+            if expiry_dt > now:
+                active.append((c, expiry_dt))
+
+        text += f"📦 <b>Active Subscriptions:</b> {len(active)}\n"
+
+        if active:
+            for i, (c, expiry_dt) in enumerate(active, 1):
+                remaining = (expiry_dt - now).days
+                online_tag = " 🟢 <i>online</i>" if c["email"] in online_emails else ""
+                data_label = "Unlimited" if c["total_gb"] == 0 else f"{c['total_gb'] // (1024**3)}GB"
                 text += (
                     f"\n─── #{i} ───\n"
-                    f"📦 {sub.package_label} | {sub.data_gb}GB | {sub.duration_days}d{status}\n"
-                    f"⏳ Expires: {expires.strftime('%Y-%m-%d')} ({remaining}d left)\n"
-                    f"{config_block(sub, sub_url)}"
+                    f"📦 {data_label} | {c['limit_ip']} device(s){online_tag}\n"
+                    f"⏳ Expires: {expiry_dt.strftime('%Y-%m-%d')} ({remaining}d left)\n"
+                    f"{_format_links_block(c['links'], c['subscription_url'])}"
                 )
         else:
             text += "\n<i>No active subscriptions.</i>"

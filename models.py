@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -19,28 +19,7 @@ class User(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    subscriptions: Mapped[list["Subscription"]] = relationship(back_populates="user", lazy="selectin")
     orders: Mapped[list["Order"]] = relationship(back_populates="user", lazy="selectin")
-
-
-class Subscription(Base):
-    __tablename__ = "subscriptions"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
-    package_label: Mapped[str] = mapped_column(String(64), nullable=False)
-    duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
-    data_gb: Mapped[int] = mapped_column(Integer, nullable=False)
-    vpn_config: Mapped[str] = mapped_column(Text, nullable=False)
-    xui_email: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
-    sub_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    is_active: Mapped[bool] = mapped_column(default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-    user: Mapped[User] = relationship(back_populates="subscriptions")
 
 
 class Order(Base):
