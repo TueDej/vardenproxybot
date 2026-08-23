@@ -22,7 +22,7 @@ NC='\033[0m'
 log()      { echo -e "${GREEN}✓${NC} $*"; }
 warn()     { echo -e "${YELLOW}⚠${NC} $*"; }
 err()      { echo -e "${RED}✗${NC} $*" >&2; }
-step()     { echo -e "\n${BOLD}─── $* ───${NC}"; }
+step()     { local title="$*"; local w=$((72 - ${#title})); [[ $w -lt 1 ]] && w=1; printf "\n${BOLD}─── %s " "$title"; printf '─%.0s' $(seq 1 $w); echo -e "───${NC}"; }
 info()     { echo -e "  ${DIM}$*${NC}"; }
 
 # ─── 1. Pre-flight ───────────────────────────────────────────────────────
@@ -289,10 +289,6 @@ SERVICE_STATUS=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo "unknow
 # ─── 6. Summary ─────────────────────────────────────────────────────────
 
 echo ""
-echo -e "${BOLD}  ═══════════════════════════════════════${NC}"
-echo -e "${BOLD}  VardenProxy Bot — Done${NC}"
-echo -e "${BOLD}  ═══════════════════════════════════════${NC}"
-echo ""
 
 if [[ "$SERVICE_STATUS" == "active" ]]; then
     log "Service:     $SERVICE_STATUS"
@@ -301,12 +297,12 @@ else
     info "Check logs: journalctl -u $SERVICE_NAME -n 50"
 fi
 
-info ""
+echo ""
 info "Install dir: $INSTALL_DIR"
 info "Env file:    $ENV_FILE"
 info "Service:     $SERVICE_FILE"
-info ""
-info "Logs:   journalctl -u $SERVICE_NAME -f"
-info "Restart: systemctl restart $SERVICE_NAME"
-info "Stop:    systemctl stop $SERVICE_NAME"
+echo ""
+info "Logs:        journalctl -u $SERVICE_NAME -f"
+info "Restart:     systemctl restart $SERVICE_NAME"
+info "Stop:        systemctl stop $SERVICE_NAME"
 echo ""
