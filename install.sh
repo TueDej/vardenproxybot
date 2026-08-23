@@ -232,8 +232,8 @@ log_info "Stopping any existing service..."
 systemctl stop "$SERVICE_NAME" 2>/dev/null || true
 sleep 1
 
-# Kill any lingering python processes running main.py
-PIDS=$(pgrep -f "venv/bin/python main.py" 2>/dev/null || true)
+# Kill any lingering bot processes running from the install directory
+PIDS=$(pgrep -f "$INSTALL_DIR/venv/bin/python $INSTALL_DIR/main.py" 2>/dev/null || true)
 if [[ -n "$PIDS" ]]; then
     log_warn "Killing leftover bot processes: $PIDS"
     kill -9 $PIDS 2>/dev/null || true
