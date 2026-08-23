@@ -84,9 +84,7 @@ class VPNPanelService:
         settings = await cls.all_settings()
         if settings:
             if uri := settings.get("subURI"):
-                base = str(uri).rstrip("/")
-                path = settings.get("subPath") or "/sub/"
-                return f"{base}{path}{sub_id}"
+                return f"{str(uri).rstrip('/')}/{sub_id}"
             scheme = "https" if settings.get("subTLS") else "http"
             host = settings.get("subDomain") or urlparse(config.panel_url).hostname or ""
             port = settings.get("subPort")
@@ -203,15 +201,15 @@ class VPNPanelService:
 
     @classmethod
     async def get_clients_by_telegram_id(cls, telegram_id: int) -> list[dict]:
-        """Return all panel clients for a user, fetched from the inbound.
+        """Return all panel clients for a user, fetched via /clients/list.
 
         Each dict has: email, sub_id, enable, expiry_time, total_gb,
         limit_ip, links, subscription_url, sub_links
         """
-        inbound = await cls._request("GET", f"{INBOUNDS_API}/get/{config.xui_inbound_id}")
-        settings_clients = (inbound or {}).get("settings", {}).get("clients", [])
+        data = await cls._request("GET", f"{CLIENTS_API}/list")
+        raw_clients = data if isinstance(data, list) else []
         results = []
-        for c in settings_clients:
+        for c in raw_clients:
             if not isinstance(c, dict):
                 continue
             if str(c.get("tgId")) != str(telegram_id):
