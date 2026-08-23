@@ -31,7 +31,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         now = datetime.now(timezone.utc)
         active_subs: list[Subscription] = [
-            s for s in user.subscriptions if s.is_active and s.expires_at > now
+            s for s in user.subscriptions
+            if s.is_active and (s.expires_at if s.expires_at.tzinfo else s.expires_at.replace(tzinfo=timezone.utc)) > now
         ]
 
         text = (
@@ -44,11 +45,12 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if active_subs:
             for i, sub in enumerate(active_subs, 1):
-                remaining = (sub.expires_at - now).days
+                expires = sub.expires_at if sub.expires_at.tzinfo else sub.expires_at.replace(tzinfo=timezone.utc)
+                remaining = (expires - now).days
                 text += (
                     f"\n─── #{i} ───\n"
                     f"📦 {sub.package_label} | {sub.data_gb}GB\n"
-                    f"⏳ Expires: {sub.expires_at.strftime('%Y-%m-%d')} ({remaining}d left)\n"
+                    f"⏳ Expires: {expires.strftime('%Y-%m-%d')} ({remaining}d left)\n"
                     f"🔗 <code>{sub.vpn_config}</code>\n"
                 )
         else:
