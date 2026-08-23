@@ -227,13 +227,21 @@ log_info "Systemd unit written."
 log_info "Reloading systemd daemon..."
 systemctl daemon-reload
 
-if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-    log_warn "Service already running. Restarting..."
-    systemctl restart "$SERVICE_NAME"
-else
-    systemctl enable "$SERVICE_NAME"
-    systemctl start "$SERVICE_NAME"
+# Stop any existing service and kill leftover processes
+log_info "Stopping any existing service..."
+systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+sleep 1
+
+# Kill any lingering python processes running main.py
+PIDS=$(pgrep -f "venv/bin/python main.py" 2>/dev/null || true)
+if [[ -n "$PIDS" ]]; then
+    log_warn "Killing leftover bot processes: $PIDS"
+    kill -9 $PIDS 2>/dev/null || true
+    sleep 1
 fi
+
+systemctl enable "$SERVICE_NAME"
+systemctl start "$SERVICE_NAME"
 
 sleep 2
 SERVICE_STATUS=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo "unknown")
