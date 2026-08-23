@@ -227,16 +227,21 @@ log_info "Systemd unit written."
 log_info "Reloading systemd daemon..."
 systemctl daemon-reload
 
-# Stop any existing service and kill leftover processes
-log_info "Stopping any existing service..."
+# Stop service and ALL leftover processes
+log_info "Stopping service and killing all bot processes..."
 systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+systemctl kill "$SERVICE_NAME" 2>/dev/null || true
 sleep 1
 
-# Kill any lingering bot processes running from the install directory
-PIDS=$(pgrep -f "$INSTALL_DIR/venv/bin/python $INSTALL_DIR/main.py" 2>/dev/null || true)
-if [[ -n "$PIDS" ]]; then
-    log_warn "Killing leftover bot processes: $PIDS"
-    kill -9 $PIDS 2>/dev/null || true
+# Force kill any remaining python processes for this bot
+pkill -9 -f "$INSTALL_DIR/venv/bin/python $INSTALL_DIR/main.py" 2>/dev/null || true
+sleep 1
+
+# Verify none remain
+REMAINING=$(pgrep -f "$INSTALL_DIR/venv/bin/python $INSTALL_DIR/main.py" 2>/dev/null | wc -l)
+if [[ "$REMAINING" -gt 0 ]]; then
+    log_warn "Force killing $REMAINING remaining processes..."
+    pgrep -f "$INSTALL_DIR/venv/bin/python $INSTALL_DIR/main.py" | xargs kill -9 2>/dev/null || true
     sleep 1
 fi
 

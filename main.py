@@ -67,6 +67,15 @@ def main():
         print("ERROR: BOT_TOKEN is not set in .env")
         return
 
+    # Prevent multiple instances using a file lock
+    import fcntl
+    lock_file = open("/tmp/vardenproxybot.lock", "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError:
+        print("ERROR: Another instance is already running. Exiting.")
+        return
+
     request = _build_request()
 
     app = (
