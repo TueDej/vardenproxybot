@@ -64,13 +64,80 @@ log_info "Service will run as: $CURRENT_USER:$CURRENT_GROUP"
 
 # ─── 3. Prompt for Environment Variables ─────────────────────────────
 
+# Helper: prompt with default (defined here so both fresh and upgrade paths use it)
+prompt_var() {
+    local var_name="$1" prompt_text="$2" default_val="$3" is_required="$4"
+    local input
+    while true; do
+        if [[ -n "$default_val" ]]; then
+            read -rp "$prompt_text [$default_val]: " input
+            input="${input:-$default_val}"
+        else
+            read -rp "$prompt_text: " input
+        fi
+        input="$(echo "$input" | xargs)"
+        if [[ "$is_required" == "true" ]] && [[ -z "$input" ]]; then
+            log_error "This field is required."
+            continue
+        fi
+        printf -v "$var_name" '%s' "$input"
+        break
+    done
+}
+
+PANEL_VARS=(PANEL_URL PANEL_API_TOKEN XUI_INBOUND_ID VPN_LIMIT_IP PANEL_VERIFY_SSL SUBSCRIPTION_BASE_URL)
+
 if [[ -f "$ENV_FILE" ]]; then
-    log_info "Environment file $ENV_FILE already exists. Skipping prompts."
+    log_info "Environment file $ENV_FILE already exists."
     # shellcheck disable=SC1090
     source "$ENV_FILE"
-    if [[ -z "${PANEL_URL:-}" ]]; then
-        log_warn "$ENV_FILE is missing the new 3x-ui panel variables"
-        log_warn "(PANEL_URL, PANEL_API_TOKEN, XUI_INBOUND_ID, ...). Add them manually!"
+
+    # Detect panel variables missing from an older env file → prompt only for those
+    MISSING_PANEL=()
+    for v in "${PANEL_VARS[@]}"; do
+        [[ -z "${!v:-}" ]] && MISSING_PANEL+=("$v")
+    done
+
+    if [[ ${#MISSING_PANEL[@]} -eq 0 ]]; then
+        log_info "All 3x-ui panel variables present. Skipping prompts."
+    elif [[ ! -t 0 ]]; then
+        log_error "$ENV_FILE is missing: ${MISSING_PANEL[*]}"
+        log_error "No TTY available. Add them manually or run the script interactively."
+        exit 1
+    else
+        echo ""
+        echo "═══════════════════════════════════════════════"
+        echo "  VardenProxy Bot — 3x-ui Panel Configuration"
+        echo "  (missing in $ENV_FILE: ${MISSING_PANEL[*]})"
+        echo "═══════════════════════════════════════════════"
+        echo ""
+
+        prompt_var PANEL_URL              "Panel URL incl. webBasePath (https://host:2053/base)"  "${PANEL_URL:-}"  true
+        prompt_var PANEL_API_TOKEN        "API Token (Settings → Security → API Token)"           "${PANEL_API_TOKEN:-}"  true
+        prompt_var XUI_INBOUND_ID         "Inbound ID to attach clients to"                       "${XUI_INBOUND_ID:-}"  true
+        prompt_var VPN_LIMIT_IP           "Devices per subscription"                              "${VPN_LIMIT_IP:-2}"  false
+        prompt_var PANEL_VERIFY_SSL       "Verify panel TLS certificate? (true/false)"            "${PANEL_VERIFY_SSL:-true}"  false
+        prompt_var SUBSCRIPTION_BASE_URL  "Subscription base URL, same host diff port (empty=omit)" "${SUBSCRIPTION_BASE_URL:-}"  false
+
+        # Rewrite env file without old/partial panel lines, then append the full block
+        log_info "Updating environment file: $ENV_FILE"
+        local_tmp="$(mktemp)"
+        panel_regex='^(PANEL_URL|PANEL_API_TOKEN|XUI_INBOUND_ID|VPN_LIMIT_IP|PANEL_VERIFY_SSL|SUBSCRIPTION_BASE_URL)='
+        grep -vE "$panel_regex" "$ENV_FILE" > "$local_tmp" || true
+        cat >> "$local_tmp" <<EOF
+
+# 3x-ui Panel — added by install script on $(date -Iseconds)
+PANEL_URL=$PANEL_URL
+PANEL_API_TOKEN=$PANEL_API_TOKEN
+XUI_INBOUND_ID=$XUI_INBOUND_ID
+VPN_LIMIT_IP=${VPN_LIMIT_IP:-2}
+PANEL_VERIFY_SSL=${PANEL_VERIFY_SSL:-true}
+SUBSCRIPTION_BASE_URL=$SUBSCRIPTION_BASE_URL
+EOF
+        mv "$local_tmp" "$ENV_FILE"
+        chmod 600 "$ENV_FILE"
+        chown "$CURRENT_USER:$CURRENT_GROUP" "$ENV_FILE" 2>/dev/null || true
+        log_info "Panel variables written to $ENV_FILE."
     fi
 else
     if [[ ! -t 0 ]]; then
@@ -83,27 +150,6 @@ else
     echo "  VardenProxy Bot — Environment Configuration"
     echo "═══════════════════════════════════════════════"
     echo ""
-
-    # Helper: prompt with default
-    prompt_var() {
-        local var_name="$1" prompt_text="$2" default_val="$3" is_required="$4"
-        local input
-        while true; do
-            if [[ -n "$default_val" ]]; then
-                read -rp "$prompt_text [$default_val]: " input
-                input="${input:-$default_val}"
-            else
-                read -rp "$prompt_text: " input
-            fi
-            input="$(echo "$input" | xargs)"
-            if [[ "$is_required" == "true" ]] && [[ -z "$input" ]]; then
-                log_error "This field is required."
-                continue
-            fi
-            printf -v "$var_name" '%s' "$input"
-            break
-        done
-    }
 
     prompt_var BOT_TOKEN        "Enter Telegram Bot Token"              ""       true
     prompt_var ADMIN_IDS        "Enter Admin Telegram IDs (comma-sep)"   ""       true
