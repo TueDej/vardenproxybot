@@ -11,15 +11,22 @@ from vpn_service import VPNPanelError, VPNPanelService
 
 
 def _format_links_block(links: list[str], sub_url: str, sub_links: list[str]) -> str:
-    lines = [f"🔗 <code>{link}</code>" for link in links if link]
+    lines = []
+    if sub_url:
+        lines.append("📡 <b>Subscription URL:</b>")
+        lines.append(f"<code>{sub_url}</code>")
     if sub_links:
-        lines.append("")
+        if lines:
+            lines.append("")
         lines.append("📡 <b>Subscription links:</b>")
         for link in sub_links:
-            lines.append(f"🔗 <code>{link}</code>")
-    if sub_url:
-        lines.append("")
-        lines.append(f"📡 Subscription URL: <code>{sub_url}</code>")
+            lines.append(f"<code>{link}</code>")
+    if links:
+        if lines:
+            lines.append("")
+        lines.append("🔗 <b>Config links:</b>")
+        for link in links:
+            lines.append(f"<code>{link}</code>")
     return "\n".join(lines)
 
 
