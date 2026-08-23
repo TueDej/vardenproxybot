@@ -85,7 +85,7 @@ prompt_var() {
     done
 }
 
-PANEL_VARS=(PANEL_URL PANEL_API_TOKEN XUI_INBOUND_ID VPN_LIMIT_IP PANEL_VERIFY_SSL SUBSCRIPTION_BASE_URL)
+PANEL_VARS=(PANEL_URL PANEL_API_TOKEN XUI_INBOUND_ID VPN_LIMIT_IP PANEL_VERIFY_SSL)
 
 if [[ -f "$ENV_FILE" ]]; then
     log_info "Environment file $ENV_FILE already exists."
@@ -117,12 +117,11 @@ if [[ -f "$ENV_FILE" ]]; then
         prompt_var XUI_INBOUND_ID         "Inbound ID to attach clients to"                       "${XUI_INBOUND_ID:-}"  true
         prompt_var VPN_LIMIT_IP           "Devices per subscription"                              "${VPN_LIMIT_IP:-2}"  false
         prompt_var PANEL_VERIFY_SSL       "Verify panel TLS certificate? (true/false)"            "${PANEL_VERIFY_SSL:-true}"  false
-        prompt_var SUBSCRIPTION_BASE_URL  "Subscription base URL, same host diff port (empty=omit)" "${SUBSCRIPTION_BASE_URL:-}"  false
 
         # Rewrite env file without old/partial panel lines, then append the full block
         log_info "Updating environment file: $ENV_FILE"
         local_tmp="$(mktemp)"
-        panel_regex='^(PANEL_URL|PANEL_API_TOKEN|XUI_INBOUND_ID|VPN_LIMIT_IP|PANEL_VERIFY_SSL|SUBSCRIPTION_BASE_URL)='
+        panel_regex='^(PANEL_URL|PANEL_API_TOKEN|XUI_INBOUND_ID|VPN_LIMIT_IP|PANEL_VERIFY_SSL)='
         grep -vE "$panel_regex" "$ENV_FILE" > "$local_tmp" || true
         cat >> "$local_tmp" <<EOF
 
@@ -132,7 +131,6 @@ PANEL_API_TOKEN=$PANEL_API_TOKEN
 XUI_INBOUND_ID=$XUI_INBOUND_ID
 VPN_LIMIT_IP=${VPN_LIMIT_IP:-2}
 PANEL_VERIFY_SSL=${PANEL_VERIFY_SSL:-true}
-SUBSCRIPTION_BASE_URL=$SUBSCRIPTION_BASE_URL
 EOF
         mv "$local_tmp" "$ENV_FILE"
         chmod 600 "$ENV_FILE"
@@ -166,7 +164,6 @@ else
     prompt_var XUI_INBOUND_ID    "Inbound ID to attach clients to"                      ""  true
     prompt_var VPN_LIMIT_IP      "Devices per subscription"                             "2" false
     prompt_var PANEL_VERIFY_SSL  "Verify panel TLS certificate? (true/false)"           "true" false
-    prompt_var SUBSCRIPTION_BASE_URL "Subscription base URL, same host diff port (empty=omit)" "" false
 
     # ─── 4. Write Environment File ───────────────────────────────────
 
@@ -187,7 +184,6 @@ PANEL_API_TOKEN=$PANEL_API_TOKEN
 XUI_INBOUND_ID=$XUI_INBOUND_ID
 VPN_LIMIT_IP=$VPN_LIMIT_IP
 PANEL_VERIFY_SSL=$PANEL_VERIFY_SSL
-SUBSCRIPTION_BASE_URL=$SUBSCRIPTION_BASE_URL
 EOF
     chmod 600 "$ENV_FILE"
     chown "$CURRENT_USER:$CURRENT_GROUP" "$ENV_FILE"

@@ -44,16 +44,19 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await session.commit()
 
         # Cross-check against the live panel: subs whose client was deleted
-        # (manually or otherwise) are deactivated here. Fail open on errors.
+        # (manually or otherwise) — and pre-panel demo rows without xui_email —
+        # are deactivated here. Fail open on panel errors.
         removed_count = 0
         online_emails: set[str] = set()
-        checkable = [s for s in active_subs if s.xui_email]
-        if config.panel_configured and checkable:
+        if config.panel_configured and active_subs:
             try:
                 panel_emails = await VPNPanelService.get_inbound_client_emails()
                 online_emails = await VPNPanelService.get_online_emails()
                 for s in list(active_subs):
-                    if s.xui_email and s.xui_email not in panel_emails:
+                    gone = not s.xui_email or s.xui_email not in panel_emails
+                    if gone:
+                        reason = "deleted from panel" if s.xui_email else "legacy entry (pre-panel)"
+                        print(f"INFO: deactivating subscription #{s.id} ({s.xui_email}): {reason}")
                         s.is_active = False
                         active_subs.remove(s)
                         removed_count += 1

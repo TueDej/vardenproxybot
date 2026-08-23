@@ -25,7 +25,6 @@ class Config:
     xui_inbound_id: int = 0
     vpn_limit_ip: int = 2
     panel_verify_ssl: bool = True
-    subscription_base_url: str = ""
 
     # SOCKS5 Proxy
     proxy_host: str = "127.0.0.1"
@@ -53,7 +52,6 @@ class Config:
         self.xui_inbound_id = int(os.getenv("XUI_INBOUND_ID", "0") or 0)
         self.vpn_limit_ip = int(os.getenv("VPN_LIMIT_IP", "2") or 0)
         self.panel_verify_ssl = os.getenv("PANEL_VERIFY_SSL", "true").lower() == "true"
-        self.subscription_base_url = os.getenv("SUBSCRIPTION_BASE_URL", "").rstrip("/")
 
     @property
     def panel_configured(self) -> bool:

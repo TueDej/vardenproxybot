@@ -74,28 +74,29 @@ class VPNPanelService:
 
     @classmethod
     async def subscription_url(cls, sub_id: str | None) -> str:
-        """Build the public subscription URL.
+        """Build the public subscription URL exactly like the panel UI does.
 
-        Priority:
-          1. SUBSCRIPTION_BASE_URL env override — used verbatim + '/sub/<id>'
-          2. Panel's own subscription settings (subTLS/subDomain/subPort/subPath),
-             so custom paths like /zub/ are respected automatically.
+        Source of truth is the panel's own settings (fetched live):
+          - subURI overrides everything when set (explicit base incl. custom path)
+          - otherwise scheme://(subDomain | panel host):subPort + subPath
         """
         if not sub_id:
             return ""
-        if config.subscription_base_url:
-            return f"{config.subscription_base_url}/sub/{sub_id}"
         settings = await cls.all_settings()
         if not settings:
             return ""
-        scheme = "https" if settings.get("subTLS") else "http"
-        host = settings.get("subDomain") or urlparse(config.panel_url).hostname or ""
-        port = settings.get("subPort")
+        if uri := settings.get("subURI"):
+            base = str(uri).rstrip("/")
+        else:
+            scheme = "https" if settings.get("subTLS") else "http"
+            host = settings.get("subDomain") or urlparse(config.panel_url).hostname or ""
+            port = settings.get("subPort")
+            netloc = f"{host}:{port}" if port else host
+            if not netloc:
+                return ""
+            base = f"{scheme}://{netloc}"
         path = settings.get("subPath") or "/sub/"
-        netloc = f"{host}:{port}" if port else host
-        if not netloc:
-            return ""
-        return f"{scheme}://{netloc}{path}{sub_id}"
+        return f"{base}{path}{sub_id}"
 
     @classmethod
     async def _request(
