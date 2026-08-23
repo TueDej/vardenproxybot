@@ -1,14 +1,18 @@
 from datetime import datetime, timezone
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
-from keyboards import get_back_to_menu_keyboard, get_durations_keyboard, get_packages_keyboard, get_payment_keyboard
+from keyboards import back_keyboard, durations_keyboard, main_menu_keyboard, packages_keyboard, payment_keyboard
 from models import Order, Subscription, User
 from packages import DURATIONS, PACKAGES
 from vpn_service import VPNPanelService
+
+# Lookup maps for text-based selection
+PACKAGE_MAP = {p["label"]: p for p in PACKAGES}
+DURATION_MAP = {d["label"]: d for d in DURATIONS}
 
 
 async def _get_or_create_user(session, telegram_user) -> User:
@@ -28,54 +32,43 @@ async def _get_or_create_user(session, telegram_user) -> User:
 
 
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-        for row in get_packages_keyboard(PACKAGES)
-    ])
-    await query.edit_message_text(
+    context.user_data.clear()
+    await update.message.reply_text(
         "🛒 <b>Select a Package</b>\n\nChoose your desired data allowance:",
-        reply_markup=keyboard,
+        reply_markup=packages_keyboard(),
         parse_mode="HTML",
     )
 
 
 async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    pkg_id = int(query.data.split("_")[1])
-    pkg = next((p for p in PACKAGES if p["id"] == pkg_id), None)
+    text = update.message.text
+    pkg = PACKAGE_MAP.get(text)
     if not pkg:
-        await query.edit_message_text("❌ Invalid package.")
+        await update.message.reply_text("❌ Invalid package. Please select from the keyboard.")
         return
 
     context.user_data["selected_package"] = pkg
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-        for row in get_durations_keyboard(pkg_id, DURATIONS)
-    ])
-    await query.edit_message_text(
+    await update.message.reply_text(
         f"📦 <b>{pkg['label']}</b> selected.\n\nChoose subscription duration:",
-        reply_markup=keyboard,
+        reply_markup=durations_keyboard(),
         parse_mode="HTML",
     )
 
 
 async def duration_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    _, pkg_id_str, dur_id_str = query.data.split("_")
-    pkg_id, dur_id = int(pkg_id_str), int(dur_id_str)
+    text = update.message.text
+    dur = DURATION_MAP.get(text)
+    if not dur:
+        await update.message.reply_text("❌ Invalid duration. Please select from the keyboard.")
+        return
 
-    pkg = next((p for p in PACKAGES if p["id"] == pkg_id), None)
-    dur = next((d for d in DURATIONS if d["id"] == dur_id), None)
-    if not pkg or not dur:
-        await query.edit_message_text("❌ Invalid selection.")
+    pkg = context.user_data.get("selected_package")
+    if not pkg:
+        await update.message.reply_text("❌ Session expired. Please start over.")
         return
 
     async with async_session() as session:
-        user = await _get_or_create_user(session, query.from_user)
+        user = await _get_or_create_user(session, update.effective_user)
         order = Order(
             user_id=user.id,
             package_label=pkg["label"],
@@ -103,56 +96,49 @@ async def duration_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚠️ <i>This is a demo. No real payment is processed.</i>\n\n"
         "Click <b>✅ I have paid</b> when ready:"
     )
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-        for row in get_payment_keyboard(order.id)
-    ])
-    await query.edit_message_text(payment_text, reply_markup=keyboard, parse_mode="HTML")
+    await update.message.reply_text(payment_text, reply_markup=payment_keyboard(), parse_mode="HTML")
 
 
 async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    order_id = int(query.data.split("_")[1])
+    order_id = context.user_data.get("order_id")
+    if not order_id:
+        await update.message.reply_text("❌ No pending order. Use 🛒 Buy Subscription to start.")
+        return
 
     async with async_session() as session:
         from sqlalchemy import select
         result = await session.execute(select(Order).where(Order.id == order_id))
         order = result.scalar_one_or_none()
         if not order:
-            await query.edit_message_text("❌ Order not found.")
+            await update.message.reply_text("❌ Order not found.")
             return
 
         if config.auto_approve:
             order.status = "approved"
             await _approve_order(session, order)
-            await query.edit_message_text(
+            context.user_data.pop("order_id", None)
+            await update.message.reply_text(
                 f"✅ <b>Payment Confirmed!</b>\n\n"
                 f"Order #{order.id} has been approved.\n"
                 f"Your VPN config is ready — check <b>👤 My Profile</b>.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-                    for row in get_back_to_menu_keyboard()
-                ]),
+                reply_markup=back_keyboard(),
                 parse_mode="HTML",
             )
         else:
-            await query.edit_message_text(
+            await update.message.reply_text(
                 f"⏳ <b>Order #{order.id} Submitted</b>\n\n"
                 "Your payment is pending admin approval.\n"
                 "You will be notified once confirmed.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-                    for row in get_back_to_menu_keyboard()
-                ]),
+                reply_markup=back_keyboard(),
                 parse_mode="HTML",
             )
 
 
 async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    order_id = int(query.data.split("_")[1])
+    order_id = context.user_data.get("order_id")
+    if not order_id:
+        await update.message.reply_text("❌ No pending order to cancel.")
+        return
 
     async with async_session() as session:
         from sqlalchemy import select
@@ -162,12 +148,10 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             order.status = "rejected"
             await session.commit()
 
-    await query.edit_message_text(
+    context.user_data.pop("order_id", None)
+    await update.message.reply_text(
         f"❌ Order #{order_id} cancelled.",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-            for row in get_back_to_menu_keyboard()
-        ]),
+        reply_markup=back_keyboard(),
         parse_mode="HTML",
     )
 

@@ -1,9 +1,10 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import (
     Application,
-    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 from telegram.request import HTTPXRequest
 
@@ -19,21 +20,6 @@ from handlers.buy import (
 )
 from handlers.profile import profile
 from handlers.start import help_command, start
-from keyboards import get_main_menu_keyboard
-
-
-async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-        for row in get_main_menu_keyboard()
-    ])
-    await query.edit_message_text(
-        "🏠 <b>Main Menu</b>\n\nSelect an option:",
-        reply_markup=keyboard,
-        parse_mode="HTML",
-    )
 
 
 def _build_request() -> HTTPXRequest:
@@ -46,6 +32,39 @@ def _build_request() -> HTTPXRequest:
     if proxy_url:
         kwargs["proxy"] = proxy_url
     return HTTPXRequest(**kwargs)
+
+
+async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Route text messages based on button presses."""
+    text = update.message.text
+
+    # Main menu buttons
+    if text == "🛒 Buy Subscription":
+        await buy_start(update, context)
+    elif text == "👤 My Profile / Subscriptions":
+        await profile(update, context)
+    elif text == "ℹ️ Help / Support":
+        await help_command(update, context)
+
+    # Navigation
+    elif text == "🔙 Main Menu":
+        await start(update, context)
+    elif text == "🔙 Back to Packages":
+        await buy_start(update, context)
+
+    # Buy flow
+    elif text in ("10 GB", "20 GB"):
+        await package_selected(update, context)
+    elif text in ("1 Month", "2 Months", "3 Months"):
+        await duration_selected(update, context)
+    elif text == "✅ I have paid":
+        await payment_confirmed(update, context)
+    elif text == "❌ Cancel":
+        await cancel_order(update, context)
+
+    # Unknown
+    else:
+        await update.message.reply_text("❓ Unknown option. Use the keyboard buttons below.")
 
 
 def main():
@@ -70,15 +89,8 @@ def main():
     app.add_handler(CommandHandler("pending", pending))
     app.add_handler(CommandHandler("stats", stats))
 
-    # Callback queries
-    app.add_handler(CallbackQueryHandler(menu_callback, pattern="^menu$"))
-    app.add_handler(CallbackQueryHandler(buy_start, pattern="^buy$"))
-    app.add_handler(CallbackQueryHandler(package_selected, pattern="^pkg_"))
-    app.add_handler(CallbackQueryHandler(duration_selected, pattern="^dur_"))
-    app.add_handler(CallbackQueryHandler(payment_confirmed, pattern="^paid_"))
-    app.add_handler(CallbackQueryHandler(cancel_order, pattern="^cancel_"))
-    app.add_handler(CallbackQueryHandler(profile, pattern="^profile$"))
-    app.add_handler(CallbackQueryHandler(help_command, pattern="^help$"))
+    # Text messages (reply keyboard)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
 
     print("🤖 Bot is running...")
     if config.proxy_url:

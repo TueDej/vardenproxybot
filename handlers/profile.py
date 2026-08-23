@@ -1,31 +1,25 @@
 from datetime import datetime, timezone
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from database import async_session
-from keyboards import get_back_to_menu_keyboard
+from keyboards import back_keyboard, main_menu_keyboard
 from models import Subscription, User
 
 
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
     async with async_session() as session:
         from sqlalchemy import select
         result = await session.execute(
-            select(User).where(User.telegram_id == query.from_user.id)
+            select(User).where(User.telegram_id == update.effective_user.id)
         )
         user = result.scalar_one_or_none()
 
         if not user:
-            await query.edit_message_text(
+            await update.message.reply_text(
                 "❌ You don't have an account yet. Use /start first.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-                    for row in get_back_to_menu_keyboard()
-                ]),
+                reply_markup=main_menu_keyboard(),
             )
             return
 
@@ -56,8 +50,4 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text += "\n<i>No active subscriptions.</i>"
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-        for row in get_back_to_menu_keyboard()
-    ])
-    await query.edit_message_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await update.message.reply_text(text, reply_markup=back_keyboard(), parse_mode="HTML")

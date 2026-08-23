@@ -1,7 +1,7 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
-from keyboards import get_main_menu_keyboard
+from keyboards import main_menu_keyboard
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -14,11 +14,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ℹ️ <b>Help / Support</b> — get assistance from our team.\n\n"
         "Select an option below to get started:"
     )
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-        for row in get_main_menu_keyboard()
-    ])
-    await update.message.reply_text(welcome_text, reply_markup=keyboard, parse_mode="HTML")
+    await update.message.reply_text(welcome_text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -29,8 +25,4 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Use <b>👤 My Profile</b> to view your active subscriptions.\n\n"
         "📩 For support, contact: @VardenProxySupport"
     )
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(text=btn, callback_data=data) for btn, data in row]
-        for row in get_main_menu_keyboard()
-    ])
-    await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await update.message.reply_text(text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
