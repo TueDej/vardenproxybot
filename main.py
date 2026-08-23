@@ -14,7 +14,6 @@ from handlers.admin import approve, pending, stats
 from handlers.buy import (
     buy_start,
     cancel_order,
-    duration_selected,
     package_selected,
     payment_confirmed,
 )
@@ -49,14 +48,10 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Navigation
     elif text == "🔙 Main Menu":
         await start(update, context)
-    elif text == "🔙 Back to Packages":
-        await buy_start(update, context)
 
     # Buy flow
-    elif text in ("10 GB", "20 GB"):
+    elif text.endswith("Toomans"):
         await package_selected(update, context)
-    elif text in ("1 Month", "2 Months", "3 Months"):
-        await duration_selected(update, context)
     elif text == "✅ I have paid":
         await payment_confirmed(update, context)
     elif text == "❌ Cancel":

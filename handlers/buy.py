@@ -5,14 +5,16 @@ from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
-from keyboards import back_keyboard, durations_keyboard, main_menu_keyboard, packages_keyboard, payment_keyboard
+from keyboards import back_keyboard, main_menu_keyboard, packages_keyboard, payment_keyboard
 from models import Order, Subscription, User
-from packages import DURATIONS, PACKAGES
+from packages import DURATION_DAYS, PACKAGES
 from vpn_service import VPNPanelService
 
 # Lookup maps for text-based selection
-PACKAGE_MAP = {p["label"]: p for p in PACKAGES}
-DURATION_MAP = {d["label"]: d for d in DURATIONS}
+PACKAGE_MAP = {}
+for p in PACKAGES:
+    key = f"{p['label']} - {p['price']:,} Toomans"
+    PACKAGE_MAP[key] = p
 
 
 async def _get_or_create_user(session, telegram_user) -> User:
@@ -34,7 +36,7 @@ async def _get_or_create_user(session, telegram_user) -> User:
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
-        "🛒 <b>Select a Package</b>\n\nChoose your desired data allowance:",
+        "🛒 <b>Select a Package</b>\n\nAll subscriptions are for 1 month:",
         reply_markup=packages_keyboard(),
         parse_mode="HTML",
     )
@@ -47,34 +49,14 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Invalid package. Please select from the keyboard.")
         return
 
-    context.user_data["selected_package"] = pkg
-    await update.message.reply_text(
-        f"📦 <b>{pkg['label']}</b> selected.\n\nChoose subscription duration:",
-        reply_markup=durations_keyboard(),
-        parse_mode="HTML",
-    )
-
-
-async def duration_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    dur = DURATION_MAP.get(text)
-    if not dur:
-        await update.message.reply_text("❌ Invalid duration. Please select from the keyboard.")
-        return
-
-    pkg = context.user_data.get("selected_package")
-    if not pkg:
-        await update.message.reply_text("❌ Session expired. Please start over.")
-        return
-
     async with async_session() as session:
         user = await _get_or_create_user(session, update.effective_user)
         order = Order(
             user_id=user.id,
             package_label=pkg["label"],
-            duration_days=dur["days"],
+            duration_days=DURATION_DAYS,
             data_gb=pkg["data_gb"],
-            amount_usd=dur["price_usd"],
+            amount_usd=pkg["price"],
             status="pending",
         )
         session.add(order)
@@ -86,8 +68,8 @@ async def duration_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payment_text = (
         f"💳 <b>Order #{order.id}</b>\n\n"
         f"📦 Package: {pkg['label']}\n"
-        f"📅 Duration: {dur['label']}\n"
-        f"💰 Amount: <b>${dur['price_usd']}</b>\n\n"
+        f"📅 Duration: 1 Month\n"
+        f"💰 Amount: <b>{pkg['price']:,} Toomans</b>\n\n"
         "─" * 20 + "\n"
         "🏦 <b>Mock Payment Details</b>\n\n"
         f"💳 Card: <code>{config.mock_card_number}</code>\n"

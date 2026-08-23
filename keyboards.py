@@ -1,17 +1,11 @@
 from telegram import ReplyKeyboardMarkup
 
+from packages import PACKAGES
+
 MAIN_MENU = [
     ["🛒 Buy Subscription"],
     ["👤 My Profile / Subscriptions"],
     ["ℹ️ Help / Support"],
-]
-
-PACKAGES = [
-    ["10 GB", "20 GB"],
-]
-
-DURATIONS = [
-    ["1 Month", "2 Months", "3 Months"],
 ]
 
 PAYMENT = [
@@ -23,9 +17,9 @@ BACK = [
     ["🔙 Main Menu"],
 ]
 
-BACK_TO_PACKAGES = [
-    ["🔙 Back to Packages"],
-]
+
+def _package_buttons():
+    return [[f"{p['label']} - {p['price']:,} Toomans"] for p in PACKAGES]
 
 
 def main_menu_keyboard():
@@ -33,11 +27,7 @@ def main_menu_keyboard():
 
 
 def packages_keyboard():
-    return ReplyKeyboardMarkup(PACKAGES, resize_keyboard=True)
-
-
-def durations_keyboard():
-    return ReplyKeyboardMarkup(DURATIONS + BACK_TO_PACKAGES, resize_keyboard=True)
+    return ReplyKeyboardMarkup(_package_buttons(), resize_keyboard=True)
 
 
 def payment_keyboard():
