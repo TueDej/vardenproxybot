@@ -19,8 +19,13 @@ class Config:
     mock_card_holder: str = "TEST USER"
     mock_crypto_wallet: str = "0xMockWalletAddressForDemoPurposes1234"
 
-    # VPN Node
-    vpn_server_host: str = "vardenproxy.example.com"
+    # 3x-ui Panel
+    panel_url: str = ""
+    panel_api_token: str = ""
+    xui_inbound_id: int = 0
+    vpn_limit_ip: int = 2
+    panel_verify_ssl: bool = True
+    subscription_base_url: str = ""
 
     # SOCKS5 Proxy
     proxy_host: str = "127.0.0.1"
@@ -41,6 +46,18 @@ class Config:
         self.proxy_port = int(os.getenv("PROXY_PORT", self.proxy_port))
         self.proxy_user = os.getenv("PROXY_USER", self.proxy_user)
         self.proxy_pass = os.getenv("PROXY_PASS", self.proxy_pass)
+
+        # 3x-ui panel settings
+        self.panel_url = os.getenv("PANEL_URL", "").rstrip("/")
+        self.panel_api_token = os.getenv("PANEL_API_TOKEN", "")
+        self.xui_inbound_id = int(os.getenv("XUI_INBOUND_ID", "0") or 0)
+        self.vpn_limit_ip = int(os.getenv("VPN_LIMIT_IP", "2") or 0)
+        self.panel_verify_ssl = os.getenv("PANEL_VERIFY_SSL", "true").lower() == "true"
+        self.subscription_base_url = os.getenv("SUBSCRIPTION_BASE_URL", "").rstrip("/")
+
+    @property
+    def panel_configured(self) -> bool:
+        return bool(self.panel_url and self.panel_api_token and self.xui_inbound_id)
 
     @property
     def proxy_url(self) -> str | None:

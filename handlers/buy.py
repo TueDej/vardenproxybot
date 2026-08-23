@@ -1,14 +1,14 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
-from keyboards import back_keyboard, main_menu_keyboard, packages_keyboard, payment_keyboard
+from keyboards import back_keyboard, packages_keyboard, payment_keyboard
 from models import Order, Subscription, User
 from packages import DURATION_DAYS, PACKAGES
-from vpn_service import VPNPanelService
+from vpn_service import VPNPanelError, VPNPanelService
 
 # Lookup maps for text-based selection
 PACKAGE_MAP = {}
@@ -98,7 +98,17 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if config.auto_approve:
             order.status = "approved"
-            await _approve_order(session, order)
+            try:
+                await _approve_order(session, order)
+            except VPNPanelError as exc:
+                await session.rollback()
+                await update.message.reply_text(
+                    f"❌ <b>Panel error</b> — could not create your config.\n"
+                    f"Order #{order.id} is still pending. Please try again later.\n"
+                    f"<code>{exc}</code>",
+                    parse_mode="HTML",
+                )
+                return
             context.user_data.pop("order_id", None)
             await update.message.reply_text(
                 f"✅ <b>Payment Confirmed!</b>\n\n"
@@ -140,14 +150,19 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _approve_order(session, order: Order) -> Subscription:
-    from datetime import timedelta
-    vpn_config = VPNPanelService.create_user_config(order.user_id, order.duration_days)
+    from sqlalchemy import select
+
+    result = await session.execute(select(User).where(User.id == order.user_id))
+    user = result.scalar_one()
+    panel = await VPNPanelService.create_client(user.telegram_id, order.duration_days, order.data_gb)
     subscription = Subscription(
         user_id=order.user_id,
         package_label=order.package_label,
         duration_days=order.duration_days,
         data_gb=order.data_gb,
-        vpn_config=vpn_config,
+        vpn_config="\n".join(panel["links"]),
+        xui_email=panel["email"],
+        sub_id=panel["sub_id"],
         is_active=True,
         expires_at=datetime.now(timezone.utc) + timedelta(days=order.duration_days),
     )
@@ -155,3 +170,12 @@ async def _approve_order(session, order: Order) -> Subscription:
     await session.commit()
     await session.refresh(subscription)
     return subscription
+
+
+def format_vpn_config(sub: Subscription) -> str:
+    """Format the config block (vless URIs + subscription URL) for a message."""
+    lines = [f"🔗 <code>{link}</code>" for link in sub.vpn_config.splitlines() if link]
+    sub_url = VPNPanelService.subscription_url(sub.sub_id)
+    if sub_url:
+        lines.append(f"📡 Subscription: <code>{sub_url}</code>")
+    return "\n".join(lines)

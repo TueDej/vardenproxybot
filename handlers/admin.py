@@ -1,13 +1,13 @@
 from datetime import timedelta, timezone
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
-from handlers.buy import _approve_order
+from handlers.buy import _approve_order, format_vpn_config
 from models import Order, Subscription
-from vpn_service import VPNPanelService
+from vpn_service import VPNPanelError, VPNPanelService
 
 
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -40,12 +40,20 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         order.status = "approved"
-        subscription = await _approve_order(session, order)
+        try:
+            subscription = await _approve_order(session, order)
+        except VPNPanelError as exc:
+            await session.rollback()
+            await update.message.reply_text(
+                f"❌ Panel error — order #{order_id} was NOT approved.\n<code>{exc}</code>",
+                parse_mode="HTML",
+            )
+            return
 
         await update.message.reply_text(
             f"✅ Order #{order_id} approved.\n"
             f"📦 {order.package_label} | {order.duration_days} days\n"
-            f"🔗 Config: <code>{subscription.vpn_config}</code>",
+            f"{format_vpn_config(subscription)}",
             parse_mode="HTML",
         )
 
@@ -56,8 +64,9 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=(
                     f"🎉 <b>Your order #{order_id} has been approved!</b>\n\n"
                     f"📦 Package: {order.package_label}\n"
-                    f"🔗 Your VPN config:\n<code>{subscription.vpn_config}</code>\n\n"
-                    "Import this link into your V2Ray/Nekoray/Streisand app."
+                    f"{format_vpn_config(subscription)}\n\n"
+                    "Import the vless:// link into your V2Ray/Nekoray/Streisand app, "
+                    "or paste the subscription URL into its 'add subscription' field."
                 ),
                 parse_mode="HTML",
             )
@@ -97,11 +106,12 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Access denied.")
         return
 
-    status = VPNPanelService.get_server_status()
+    status = await VPNPanelService.get_server_status()
     text = (
         "📊 <b>Server Stats</b>\n\n"
-        f"🖥 Server: {status['server']}\n"
+        f"🖥 Panel: {status['server']}\n"
         f"🟢 Status: {status['status']}\n"
-        f"👥 Active: {status['active_users']}/{status['max_users']}"
+        f"🟢 Online now: {status['online_users']}\n"
+        f"👥 Inbound clients: {status['inbound_clients']}"
     )
     await update.message.reply_text(text, parse_mode="HTML")

@@ -68,6 +68,10 @@ if [[ -f "$ENV_FILE" ]]; then
     log_info "Environment file $ENV_FILE already exists. Skipping prompts."
     # shellcheck disable=SC1090
     source "$ENV_FILE"
+    if [[ -z "${PANEL_URL:-}" ]]; then
+        log_warn "$ENV_FILE is missing the new 3x-ui panel variables"
+        log_warn "(PANEL_URL, PANEL_API_TOKEN, XUI_INBOUND_ID, ...). Add them manually!"
+    fi
 else
     if [[ ! -t 0 ]]; then
         log_error "No TTY available and $ENV_FILE not found. Create it manually or run interactively."
@@ -109,6 +113,14 @@ else
     prompt_var PROXY_USER       "SOCKS5 Proxy Username (leave empty)"    ""       false
     prompt_var PROXY_PASS       "SOCKS5 Proxy Password (leave empty)"    ""       false
     prompt_var DATABASE_URL     "Database URL"                           "sqlite+aiosqlite:///vardenproxy.db" false
+    echo ""
+    echo "  3x-ui Panel (required for real config generation)"
+    prompt_var PANEL_URL         "Panel URL incl. webBasePath (https://host:2053/base)"  ""  true
+    prompt_var PANEL_API_TOKEN   "API Token (Settings → Security → API Token)"          ""  true
+    prompt_var XUI_INBOUND_ID    "Inbound ID to attach clients to"                      ""  true
+    prompt_var VPN_LIMIT_IP      "Devices per subscription"                             "2" false
+    prompt_var PANEL_VERIFY_SSL  "Verify panel TLS certificate? (true/false)"           "true" false
+    prompt_var SUBSCRIPTION_BASE_URL "Subscription base URL, same host diff port (empty=omit)" "" false
 
     # ─── 4. Write Environment File ───────────────────────────────────
 
@@ -124,6 +136,12 @@ PROXY_PORT=$PROXY_PORT
 PROXY_USER=$PROXY_USER
 PROXY_PASS=$PROXY_PASS
 DATABASE_URL=$DATABASE_URL
+PANEL_URL=$PANEL_URL
+PANEL_API_TOKEN=$PANEL_API_TOKEN
+XUI_INBOUND_ID=$XUI_INBOUND_ID
+VPN_LIMIT_IP=$VPN_LIMIT_IP
+PANEL_VERIFY_SSL=$PANEL_VERIFY_SSL
+SUBSCRIPTION_BASE_URL=$SUBSCRIPTION_BASE_URL
 EOF
     chmod 600 "$ENV_FILE"
     chown "$CURRENT_USER:$CURRENT_GROUP" "$ENV_FILE"

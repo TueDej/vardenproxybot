@@ -32,6 +32,8 @@ class Subscription(Base):
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
     data_gb: Mapped[int] = mapped_column(Integer, nullable=False)
     vpn_config: Mapped[str] = mapped_column(Text, nullable=False)
+    xui_email: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    sub_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
