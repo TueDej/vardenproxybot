@@ -76,7 +76,17 @@ class VPNPanelService:
                 ) as client:
                     resp = await client.request(method, path, json=json_body)
             except httpx.HTTPError as exc:
-                last_error = VPNPanelError(f"Panel unreachable: {exc}")
+                msg = str(exc)
+                if "WRONG_VERSION_NUMBER" in msg or "wrong version number" in msg.lower():
+                    reason = (
+                        f"{exc} (hint: the panel port answered plain HTTP — "
+                        f"use http:// instead of https:// in PANEL_URL)"
+                    )
+                elif "certificate verify" in msg.lower() or "self-signed" in msg.lower():
+                    reason = f"{exc} (hint: self-signed cert? set PANEL_VERIFY_SSL=false)"
+                else:
+                    reason = msg
+                last_error = VPNPanelError(f"Panel unreachable: {reason}")
             else:
                 if resp.status_code in (401, 403):
                     raise VPNPanelError("Panel authentication failed — check PANEL_API_TOKEN.")

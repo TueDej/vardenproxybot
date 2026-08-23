@@ -96,6 +96,9 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Order not found.")
             return
 
+        # Capture before approval: a rollback expires the ORM object
+        order_id = order.id
+
         if config.auto_approve:
             order.status = "approved"
             try:
@@ -104,7 +107,7 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await session.rollback()
                 await update.message.reply_text(
                     f"❌ <b>Panel error</b> — could not create your config.\n"
-                    f"Order #{order.id} is still pending. Please try again later.\n"
+                    f"Order #{order_id} is still pending. Please try again later.\n"
                     f"<code>{exc}</code>",
                     parse_mode="HTML",
                 )
