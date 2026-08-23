@@ -18,8 +18,10 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not user:
             await update.message.reply_text(
-                "❌ You don't have an account yet. Use /start first.",
+                "🛒 You don't have an active subscription yet.\n\n"
+                "Use <b>🛒 Buy Subscription</b> to get started!",
                 reply_markup=main_menu_keyboard(),
+                parse_mode="HTML",
             )
             return
 
