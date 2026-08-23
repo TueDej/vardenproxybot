@@ -60,14 +60,12 @@ class VPNPanelService:
         """Fetch (and cache) the panel's AllSetting object."""
         if cls._settings_cache is not None:
             return cls._settings_cache
-        for suffix in ("", "/list"):
-            try:
-                obj = await cls._request("GET", f"{SETTINGS_API}{suffix}", retries=1)
-            except Exception:
-                continue
-            if isinstance(obj, dict) and obj:
-                cls._settings_cache = obj
-                break
+        try:
+            obj = await cls._request("POST", f"{SETTINGS_API}/all", retries=1)
+        except Exception:
+            obj = {}
+        if isinstance(obj, dict) and obj:
+            cls._settings_cache = obj
         else:
             cls._settings_cache = {}
         return cls._settings_cache
@@ -79,24 +77,31 @@ class VPNPanelService:
         Source of truth is the panel's own settings (fetched live):
           - subURI overrides everything when set (explicit base incl. custom path)
           - otherwise scheme://(subDomain | panel host):subPort + subPath
+        Falls back to deriving from PANEL_URL if settings are unavailable.
         """
         if not sub_id:
             return ""
         settings = await cls.all_settings()
-        if not settings:
-            return ""
-        if uri := settings.get("subURI"):
-            base = str(uri).rstrip("/")
-        else:
+        if settings:
+            if uri := settings.get("subURI"):
+                base = str(uri).rstrip("/")
+                path = settings.get("subPath") or "/sub/"
+                return f"{base}{path}{sub_id}"
             scheme = "https" if settings.get("subTLS") else "http"
             host = settings.get("subDomain") or urlparse(config.panel_url).hostname or ""
             port = settings.get("subPort")
             netloc = f"{host}:{port}" if port else host
-            if not netloc:
-                return ""
-            base = f"{scheme}://{netloc}"
-        path = settings.get("subPath") or "/sub/"
-        return f"{base}{path}{sub_id}"
+            if netloc:
+                path = settings.get("subPath") or "/sub/"
+                return f"{scheme}://{netloc}{path}{sub_id}"
+        # Fallback: derive from PANEL_URL
+        parsed = urlparse(config.panel_url)
+        host = parsed.hostname or ""
+        if not host:
+            return ""
+        port = parsed.port
+        netloc = f"{host}:{port}" if port else host
+        return f"{parsed.scheme}://{netloc}/sub/{sub_id}"
 
     @classmethod
     async def _request(
@@ -198,21 +203,21 @@ class VPNPanelService:
 
     @classmethod
     async def get_clients_by_telegram_id(cls, telegram_id: int) -> list[dict]:
-        """Return all panel clients for a user, fetched live from the inbound.
+        """Return all panel clients for a user, fetched via the tgId API.
 
-        Each dict has: email, sub_id, enable, expiry_time, total_gb, links, subscription_url
+        Each dict has: email, sub_id, enable, expiry_time, total_gb,
+        limit_ip, links, subscription_url, sub_links
         """
-        inbound = await cls._request("GET", f"{INBOUNDS_API}/get/{config.xui_inbound_id}")
-        settings_clients = (inbound or {}).get("settings", {}).get("clients", [])
+        data = await cls._request("GET", f"{CLIENTS_API}/get/tgId/{telegram_id}")
+        raw_clients = data if isinstance(data, list) else []
         results = []
-        for c in settings_clients:
+        for c in raw_clients:
             if not isinstance(c, dict):
-                continue
-            if c.get("tgId") != telegram_id:
                 continue
             email = c.get("email", "")
             sub_id = c.get("subId", "")
             links = await cls.get_client_links(email)
+            sub_links = await cls.get_subscription_links(sub_id) if sub_id else []
             sub_url = await cls.subscription_url(sub_id) if sub_id else ""
             results.append(
                 {
@@ -224,9 +229,20 @@ class VPNPanelService:
                     "limit_ip": c.get("limitIp", 0),
                     "links": links,
                     "subscription_url": sub_url,
+                    "sub_links": sub_links,
                 }
             )
         return results
+
+    @classmethod
+    async def get_subscription_links(cls, sub_id: str) -> list[str]:
+        """Fetch config links for a subscription ID (all clients with this subId)."""
+        if not sub_id:
+            return []
+        try:
+            return normalize_links(await cls._request("GET", f"{CLIENTS_API}/subLinks/{sub_id}"))
+        except VPNPanelError:
+            return []
 
     @classmethod
     async def get_client_links(cls, email: str) -> list[str]:
@@ -246,7 +262,7 @@ class VPNPanelService:
         (e.g. older panel versions) — online status is non-critical.
         """
         try:
-            online = await cls._request("GET", f"{CLIENTS_API}/onlines")
+            online = await cls._request("POST", f"{CLIENTS_API}/onlines")
         except VPNPanelError:
             return set()
         if isinstance(online, list):
@@ -262,7 +278,7 @@ class VPNPanelService:
             "inbound_clients": 0,
         }
         try:
-            online = await cls._request("GET", f"{CLIENTS_API}/onlines")
+            online = await cls._request("POST", f"{CLIENTS_API}/onlines")
             if isinstance(online, list):
                 status["online_users"] = len(online)
         except VPNPanelError:
