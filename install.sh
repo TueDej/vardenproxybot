@@ -230,20 +230,14 @@ systemctl daemon-reload
 # Stop service and ALL leftover processes
 log_info "Stopping service and killing all bot processes..."
 systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-systemctl kill "$SERVICE_NAME" 2>/dev/null || true
 sleep 1
 
 # Force kill any remaining python processes for this bot
-pkill -9 -f "$INSTALL_DIR/venv/bin/python $INSTALL_DIR/main.py" 2>/dev/null || true
+pkill -9 -f "$INSTALL_DIR/venv/bin/python.*main.py" 2>/dev/null || true
 sleep 1
 
-# Verify none remain
-REMAINING=$(pgrep -f "$INSTALL_DIR/venv/bin/python $INSTALL_DIR/main.py" 2>/dev/null | wc -l)
-if [[ "$REMAINING" -gt 0 ]]; then
-    log_warn "Force killing $REMAINING remaining processes..."
-    pgrep -f "$INSTALL_DIR/venv/bin/python $INSTALL_DIR/main.py" | xargs kill -9 2>/dev/null || true
-    sleep 1
-fi
+# Remove stale lock file
+rm -f /tmp/vardenproxybot.lock
 
 systemctl enable "$SERVICE_NAME"
 systemctl start "$SERVICE_NAME"
