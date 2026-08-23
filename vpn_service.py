@@ -72,6 +72,7 @@ class VPNPanelService:
                     base_url=config.panel_url,
                     headers={"Authorization": f"Bearer {config.panel_api_token}"},
                     verify=config.panel_verify_ssl,
+                    trust_env=False,
                     timeout=httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=10.0),
                 ) as client:
                     resp = await client.request(method, path, json=json_body)
@@ -86,18 +87,22 @@ class VPNPanelService:
                     reason = f"{exc} (hint: self-signed cert? set PANEL_VERIFY_SSL=false)"
                 else:
                     reason = msg
-                last_error = VPNPanelError(f"Panel unreachable: {reason}")
+                last_error = VPNPanelError(f"Panel unreachable [{method} {path}]: {reason}")
             else:
                 if resp.status_code in (401, 403):
                     raise VPNPanelError("Panel authentication failed — check PANEL_API_TOKEN.")
                 try:
                     data = resp.json()
-                except ValueError as exc:
-                    last_error = VPNPanelError(f"Panel returned non-JSON response (HTTP {resp.status_code}).")
+                except ValueError:
+                    snippet = " ".join((resp.text or "").split())[:160]
+                    suffix = f": {snippet}" if snippet else ""
+                    last_error = VPNPanelError(
+                        f"Non-JSON response (HTTP {resp.status_code}) for {method} {path}{suffix}"
+                    )
                     data = None
                 if data is not None:
                     if not data.get("success"):
-                        raise VPNPanelError(f"Panel error: {data.get('msg') or resp.status_code}")
+                        raise VPNPanelError(f"Panel error [{method} {path}]: {data.get('msg') or resp.status_code}")
                     return data.get("obj")
             if attempt < retries:
                 await asyncio.sleep(0.5 * attempt)
@@ -165,26 +170,52 @@ class VPNPanelService:
 
 
 async def _selfcheck() -> None:
-    """Standalone credential check: python -m vpn_service"""
+    """Standalone credential + API-version check: python -m vpn_service"""
     from models import Base  # noqa: F401  (ensures package imports cleanly)
 
     if not VPNPanelService.is_configured():
         print("ERROR: PANEL_URL / PANEL_API_TOKEN / XUI_INBOUND_ID not set.")
         return
-    print(f"Panel: {config.panel_url}")
+
+    print(f"Panel base URL : {config.panel_url}")
+    print(f"Inbound ID     : {config.xui_inbound_id}")
+    print(f"TLS verify     : {config.panel_verify_ssl}")
+    print("")
+
+    # Step 1: auth + inbound reachable (endpoint exists in both v2.x and v3.x)
     try:
         inbound = await VPNPanelService._request(
-            "GET", f"{INBOUNDS_API}/get/{config.xui_inbound_id}"
+            "GET", f"{INBOUNDS_API}/get/{config.xui_inbound_id}", retries=1
         )
     except VPNPanelError as exc:
-        print(f"FAIL: {exc}")
+        print(f"FAIL auth/inbound: {exc}")
+        print("")
+        print("Checklist:")
+        print("  1. PANEL_URL must include the webBasePath, e.g. https://host:2053/<base>/")
+        print("  2. Scheme must match the panel port (http:// vs https://)")
+        print("  3. PANEL_VERIFY_SSL=false if the cert is self-signed")
         return
     remark = inbound.get("remark") if isinstance(inbound, dict) else None
     port = inbound.get("port") if isinstance(inbound, dict) else None
     protocol = inbound.get("protocol") if isinstance(inbound, dict) else None
     clients = (inbound or {}).get("settings", {}).get("clients", [])
-    print(f"OK: inbound #{config.xui_inbound_id} -> remark={remark!r} "
-          f"protocol={protocol} port={port} clients={len(clients)}")
+    print(f"OK   auth + inbound: remark={remark!r} protocol={protocol} "
+          f"port={port} clients={len(clients)}")
+
+    # Step 2: does the modern v3 client API exist on this panel?
+    try:
+        await VPNPanelService._request("GET", f"{CLIENTS_API}/list", retries=1)
+    except VPNPanelError as exc:
+        print(f"WARN modern client API: {exc}")
+        print("")
+        print(f"This panel does not answer GET {CLIENTS_API}/list.")
+        print("It is likely an older 3x-ui (v2.x) which only has the legacy")
+        print("/panel/api/inbounds/addClient API. Upgrade the panel to latest")
+        print("MHSanaei/3x-ui, or ask for legacy-mode support in the bot.")
+        return
+    print("OK   modern client API (/panel/api/clients/*) available")
+    print("")
+    print("ALL GOOD — the bot can create real configs.")
 
 
 if __name__ == "__main__":
