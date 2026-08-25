@@ -30,13 +30,19 @@ def build_expiry_ms(duration_days: int) -> int:
     return int(expires.timestamp() * 1000)
 
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+
+
 def rewrite_vless_link(link: str) -> str:
     """Rewrite a panel vless URI so clients enter through the public reverse proxy.
 
-    The panel emits links pointing at its raw backend port with security=none.
-    Clients must instead connect on the standard TLS entry: port is forced to
-    PUBLIC_ENTRY_PORT, TLS/SNI/fingerprint/ALPN are enforced, and transport
-    settings (type/host/path/...) are preserved.
+    The panel emits links pointing at its raw backend address (often
+    localhost:PORT) with security=none. Clients must instead connect to the
+    public domain on the standard TLS entry. The public host is taken from the
+    transport ``host`` parameter (set by the operator in the inbound stream
+    settings); loopback values fall back to PANEL_URL's hostname. Port is
+    forced to PUBLIC_ENTRY_PORT, TLS/SNI/fingerprint/ALPN are enforced, and
+    remaining transport settings (type/path/...) are preserved.
     Non-vless or malformed URIs are returned unchanged.
     """
     try:
@@ -47,10 +53,23 @@ def rewrite_vless_link(link: str) -> str:
         return link
 
     params = dict(parse_qsl(parts.query, keep_blank_values=True))
+
+    # Public domain: transport host param wins over the (backend) authority.
+    public_host = (params.get("host") or "").strip()
+    if ":" in public_host:  # strip any accidental :port suffix
+        public_host = public_host.split(":", 1)[0]
+    public_host = public_host.strip("[]").strip() or (parts.hostname or "")
+    if not public_host:
+        return link
+    if public_host.lower() in _LOOPBACK_HOSTS and config.panel_url:
+        fallback = urlsplit(config.panel_url).hostname
+        if fallback:
+            public_host = fallback
+
     rewritten = {
         "encryption": params.pop("encryption", "none"),
         "security": "tls",
-        "sni": parts.hostname,
+        "sni": public_host,
         "fp": "chrome",
         "alpn": "h2",
         "insecure": "0",
@@ -62,7 +81,7 @@ def rewrite_vless_link(link: str) -> str:
     for key, value in params.items():  # any unexpected extras keep their order
         rewritten.setdefault(key, value)
 
-    netloc = f"{parts.username}@{parts.hostname}:{PUBLIC_ENTRY_PORT}"
+    netloc = f"{parts.username}@{public_host}:{PUBLIC_ENTRY_PORT}"
     return urlunsplit((parts.scheme, netloc, parts.path, urlencode(rewritten), parts.fragment))
 
 
