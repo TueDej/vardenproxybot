@@ -174,7 +174,7 @@ function calcPrice(base, gb, manual) {
   if (gb === 0) return manual != null ? manual : 500000;
   const d = calcDiscount(gb);
   const raw = base * gb * (1 - d);
-  return Math.max(1000, Math.round(raw));
+  return Math.max(5000, Math.floor(raw / 5000) * 5000);
 }
 
 function cloneState(s) {

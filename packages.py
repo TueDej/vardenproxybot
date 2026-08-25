@@ -27,7 +27,7 @@ def _calc_discount(gb: int) -> float:
 
 
 def calc_price(base_per_gb: int, data_gb: int, manual_price: int | None = None) -> int:
-    """Calculate price with discount (no .999 trick).
+    """Calculate price with discount, rounded down to multiple of 5000 toman.
 
     Unlimited (0) uses manual_price.
     """
@@ -38,7 +38,9 @@ def calc_price(base_per_gb: int, data_gb: int, manual_price: int | None = None) 
         return 500000
     discount = _calc_discount(data_gb)
     raw = base_per_gb * data_gb * (1 - discount)
-    return max(1000, round(raw))
+    # Round down to nearest 5000
+    price = (int(raw) // 5000) * 5000
+    return max(5000, price)
 
 
 def _load_settings() -> dict:
