@@ -567,6 +567,7 @@ code {
   flex-wrap: wrap;
   gap: 12px;
   align-items: end;
+  justify-content: space-between;
 }
 
 .packages-controls label {
@@ -597,6 +598,7 @@ code {
   flex-direction: row !important;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
   cursor: pointer;
   font-size: 13px;
   color: var(--text);
