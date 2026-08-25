@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
-from keyboards import back_keyboard, packages_keyboard, payment_keyboard
+from keyboards import back_keyboard, main_menu_keyboard, packages_keyboard, payment_keyboard
 from models import Order, User
 from packages import DURATION_DAYS, PACKAGES
 from vpn_service import VPNPanelError, VPNPanelService
@@ -183,7 +183,7 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data.pop("order_id", None)
                 await update.message.reply_text(
                     f"✅ Order #{oid} was already approved.",
-                    reply_markup=back_keyboard(),
+                    reply_markup=main_menu_keyboard(),
                     parse_mode="HTML",
                 )
                 return
@@ -209,7 +209,7 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✅ <b>Payment Confirmed!</b>\n\n"
                 f"Order #{oid} has been approved.{ref_line}\n"
                 f"Your VPN config is ready — check <b>👤 My Profile</b>.",
-                reply_markup=back_keyboard(),
+                reply_markup=main_menu_keyboard(),
                 parse_mode="HTML",
             )
         elif config.auto_approve:

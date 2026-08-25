@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from config import config
 from database import async_session
+from keyboards import main_menu_keyboard
 from handlers.buy import OrderAlreadyApproved, verify_and_fulfill_order
 from models import Order
 from vpn_service import VPNPanelError
@@ -90,14 +91,21 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
 
 
 async def _notify(application, chat_id: int, text: str | None) -> None:
-    """Best-effort Telegram notification about the successful payment."""
+    """Best-effort Telegram notification about the completed payment.
+
+    Attaches the main-menu keyboard so the stale ✅ I have paid / ❌ Cancel
+    buttons are replaced once payment is settled.
+    """
     try:
         if text is None:
             text = (
                 "🎉 <b>Your payment was confirmed!</b>\n\n"
                 "Your VPN config is ready — check <b>👤 My Profile</b> in the bot."
             )
-        await application.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        await application.bot.send_message(
+            chat_id=chat_id, text=text, parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
     except Exception:
         log.warning("Could not notify user %s about completed payment", chat_id, exc_info=True)
 
