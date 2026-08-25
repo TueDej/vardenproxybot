@@ -47,7 +47,7 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     if isinstance(update, Update) and update.effective_message:
         try:
             await update.effective_message.reply_text(
-                "⚠️ Something went wrong. Please try again later."
+                "⚠️ خطایی رخ داد؛ لطفاً کمی بعد دوباره تلاش کنید."
             )
         except TelegramError:
             log.warning("Could not deliver error notice to the user.")
@@ -70,28 +70,34 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     # Main menu buttons
-    if text == "🛒 Buy Subscription":
+    if text == "🛒 خرید اشتراک":
         await buy_start(update, context)
-    elif text == "👤 My Profile / Subscriptions":
+    elif text == "👤 پروفایل و اشتراک‌های من":
         await profile(update, context)
-    elif text == "ℹ️ Help / Support":
+    elif text == "ℹ️ راهنما و پشتیبانی":
         await help_command(update, context)
 
     # Navigation
-    elif text == "🏠 Home":
-        await start(update, context)
-    elif text == "🔙 Main Menu":  # legacy button still on some clients' screens
+    elif text == "🏠 خانه":
         await start(update, context)
 
     # Buy flow
-    elif text.endswith("Toomans"):
+    elif text.endswith("تومان"):
         await package_selected(update, context)
+    elif text == "❌ انصراف":
+        await cancel_order(update, context)
+
+    # Legacy labels still sitting on old clients' keyboards
+    elif text == "🔙 Main Menu" or text == "🏠 Home":
+        await start(update, context)
     elif text == "❌ Cancel":
         await cancel_order(update, context)
 
     # Unknown
     else:
-        await update.message.reply_text("❓ Unknown option. Use the keyboard buttons below.")
+        await update.message.reply_text(
+            "❓ گزینه نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید."
+        )
 
 
 def main():

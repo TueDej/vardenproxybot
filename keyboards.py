@@ -3,16 +3,16 @@ from telegram import ReplyKeyboardMarkup
 from packages import PACKAGES
 
 MAIN_MENU = [
-    ["🛒 Buy Subscription"],
-    ["👤 My Profile / Subscriptions"],
-    ["ℹ️ Help / Support"],
+    ["🛒 خرید اشتراک"],
+    ["👤 پروفایل و اشتراک‌های من"],
+    ["ℹ️ راهنما و پشتیبانی"],
 ]
 
-HOME_BUTTON = ["🏠 Home"]
+HOME_BUTTON = ["🏠 خانه"]
 
 
 def _package_buttons():
-    rows = [[f"{p['label']} - {p['price']:,} Toomans"] for p in PACKAGES]
+    rows = [[f"{p['label']} - {p['price']:,} تومان"] for p in PACKAGES]
     rows.append(HOME_BUTTON)
     return rows
 
@@ -29,7 +29,7 @@ def cancel_keyboard():
     """Gateway flow: payment is detected automatically, so only cancel/home."""
     return ReplyKeyboardMarkup(
         [
-            ["❌ Cancel"],
+            ["❌ انصراف"],
             HOME_BUTTON,
         ],
         resize_keyboard=True,

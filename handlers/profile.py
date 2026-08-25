@@ -23,13 +23,13 @@ def _expiry_dt(ms: int) -> datetime | None:
 
 
 def _data_label(total_gb: int) -> str:
-    return "Unlimited" if total_gb == 0 else f"{total_gb // (1024**3)}GB"
+    return "نامحدود" if total_gb == 0 else f"{total_gb // (1024**3)} گیگابایت"
 
 
 def _format_links_block(links: list[str]) -> str:
     if not links:
         return ""
-    lines = ["🔗 <b>Config links:</b>"]
+    lines = ["🔗 <b>کانفیگ‌ها:</b>"]
     for link in links:
         lines.append(f"<pre><code>{escape(link)}</code></pre>")
     return "\n".join(lines)
@@ -37,15 +37,15 @@ def _format_links_block(links: list[str]) -> str:
 
 def _format_product_message(c: dict, expiry_dt: datetime | None, online_emails: set) -> str:
     if expiry_dt is None:
-        expiry_line = "⏳ Expires: never"
+        expiry_line = "⏳ انقضا: ندارد"
     else:
         remaining = (expiry_dt - datetime.now(timezone.utc)).days
-        expiry_line = f"⏳ Expires: {expiry_dt.strftime('%Y-%m-%d')} ({remaining}d left)"
-    online_tag = " 🟢 <i>online</i>" if c["email"] in online_emails else ""
+        expiry_line = f"⏳ انقضا: {expiry_dt.strftime('%Y-%m-%d')} ({remaining} روز باقی‌مانده)"
+    online_tag = " 🟢 <i>آنلاین</i>" if c["email"] in online_emails else ""
     links_block = _format_links_block(c["links"])
     suffix = f"\n{links_block}" if links_block else ""
     return (
-        f"📦 {_data_label(c['total_gb'])} | {c['limit_ip']} device(s){online_tag}\n"
+        f"📦 {_data_label(c['total_gb'])} | {c['limit_ip']} دستگاه{online_tag}\n"
         f"{expiry_line}"
         f"{suffix}"
     )
@@ -59,29 +59,29 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not user:
             await update.message.reply_text(
-                "🛒 You don't have an active subscription yet.\n\n"
-                "Use <b>🛒 Buy Subscription</b> to get started!",
+                "🛒 هنوز اشتراک فعالی ندارید.\n\n"
+                "برای شروع، گزینه <b>🛒 خرید اشتراک</b> را انتخاب کنید.",
                 reply_markup=main_menu_keyboard(),
                 parse_mode="HTML",
             )
             return
 
         text = (
-            f"👤 <b>Profile</b>\n\n"
-            f"🆔 User ID: <code>{user.telegram_id}</code>\n"
-            f"📛 Name: {escape(user.first_name)}\n"
-            f"📅 Member since: {user.created_at.strftime('%Y-%m-%d')}\n\n"
+            f"👤 <b>پروفایل</b>\n\n"
+            f"🆔 شناسه کاربری: <code>{user.telegram_id}</code>\n"
+            f"📛 نام: {escape(user.first_name)}\n"
+            f"📅 عضو از: {user.created_at.strftime('%Y-%m-%d')}\n\n"
         )
 
     if not config.panel_configured:
-        text += "<i>Panel not configured.</i>"
+        text += "<i>اطلاعات سرور هنوز پیکربندی نشده است.</i>"
         await update.message.reply_text(text, reply_markup=home_keyboard(), parse_mode="HTML")
         return
 
     try:
         clients = await VPNPanelService.get_clients_by_telegram_id(telegram_id)
     except VPNPanelError as exc:
-        text += f"<i>Panel error: {escape(str(exc))}</i>"
+        text += f"<i>خطای سرور: {escape(str(exc))}</i>"
         await update.message.reply_text(text, reply_markup=home_keyboard(), parse_mode="HTML")
         return
 
@@ -99,11 +99,11 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             expired.append((c, expiry_dt))
 
-    summary = f"📦 <b>Active Subscriptions:</b> {len(active)}"
+    summary = f"📦 <b>اشتراک‌های فعال:</b> {len(active)}"
     if expired:
-        summary += f"\n⌛ Expired: {len(expired)}"
+        summary += f"\n⌛ منقضی‌شده: {len(expired)}"
     if disabled:
-        summary += f"\n🚫 Disabled: {len(disabled)}"
+        summary += f"\n🚫 غیرفعال: {len(disabled)}"
 
     await update.message.reply_text(
         text + summary, reply_markup=home_keyboard(), parse_mode="HTML"
@@ -116,9 +116,9 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     for c, expiry_dt in expired:
-        when = "unknown" if expiry_dt is None else expiry_dt.strftime("%Y-%m-%d")
+        when = "نامشخص" if expiry_dt is None else expiry_dt.strftime("%Y-%m-%d")
         await update.message.reply_text(
-            f"⌛ <b>Expired</b> — {_data_label(c['total_gb'])}, ended {when}\n"
-            "Use 🛒 Buy Subscription to renew.",
+            f"⌛ <b>منقضی‌شده</b> — {_data_label(c['total_gb'])}، پایان: {when}\n"
+            "برای تمدید، گزینه 🛒 خرید اشتراک را انتخاب کنید.",
             parse_mode="HTML",
         )

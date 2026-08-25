@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 # Lookup map for text-based package selection
 PACKAGE_MAP = {
-    f"{p['label']} - {p['price']:,} Toomans": p for p in PACKAGES
+    f"{p['label']} - {p['price']:,} تومان": p for p in PACKAGES
 }
 
 
@@ -46,14 +46,11 @@ def purchase_blocked_reason(telegram_id: int) -> str | None:
     """Return a user-facing reason string if this user may not buy right now."""
     if not config.zarinpal_configured:
         return (
-            "💳 Payments are temporarily unavailable.\n"
-            "Please contact support."
+            "💳 پرداخت‌ها موقتاً در دسترس نیستند.\n"
+            "لطفاً بعداً تلاش کنید یا با پشتیبانی تماس بگیرید."
         )
     if config.zarinpal_sandbox and telegram_id not in config.admin_ids:
-        return (
-            "🔒 <b>Test mode</b> — purchases are currently limited "
-            "to the shop owner."
-        )
+        return "🔒 <b>حالت آزمایشی</b> — فعلاً فقط مدیر فروشگاه امکان خرید دارد."
     return None
 
 
@@ -91,7 +88,7 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     context.user_data.clear()
     await update.message.reply_text(
-        "🛒 <b>Select a Package</b>\n\nAll subscriptions are for 1 month:",
+        "🛒 <b>انتخاب پکیج</b>\n\nتمام اشتراک‌ها یک‌ماهه هستند:",
         reply_markup=packages_keyboard(),
         parse_mode="HTML",
     )
@@ -101,7 +98,7 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     pkg = PACKAGE_MAP.get(text)
     if not pkg:
-        await update.message.reply_text("❌ Invalid package. Please select from the keyboard.")
+        await update.message.reply_text("❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید.")
         return
 
     blocked = purchase_blocked_reason(update.effective_user.id)
@@ -145,8 +142,8 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await session.commit()
         context.user_data.pop("order_id", None)
         await update.message.reply_text(
-            "❌ <b>Could not start the payment.</b>\n"
-            "Please try again in a few minutes.\n"
+            "❌ <b>خطا در ایجاد پرداخت</b>\n"
+            "لطفاً چند دقیقه بعد دوباره تلاش کنید.\n"
             f"<code>{escape(str(exc))}</code>",
             parse_mode="HTML",
         )
@@ -162,14 +159,13 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     separator = "─" * 20
     gateway_text = (
-        f"💳 <b>Order #{order.id}</b>\n\n"
-        f"📦 Package: {escape(pkg['label'])}\n"
-        f"📅 Duration: 1 Month\n"
-        f"💰 Amount: <b>{pkg['price']:,} Toomans</b>\n\n"
+        f"💳 <b>سفارش #{order.id}</b>\n\n"
+        f"📦 پکیج: {escape(pkg['label'])}\n"
+        f"📅 مدت: یک ماه\n"
+        f"💰 مبلغ: <b>{pkg['price']:,} تومان</b>\n\n"
         f"{separator}\n"
-        "Tap the button below to pay securely via <b>Zarinpal</b>.\n"
-        "✅ Your subscription is activated automatically right after payment — "
-        "no confirmation needed."
+        "برای پرداخت امن، روی دکمه زیر بزنید و پرداخت را در <b>درگاه زرین‌پال</b> انجام دهید.\n"
+        "✅ بلافاصله پس از پرداخت، اشتراک شما به‌صورت خودکار فعال می‌شود."
     )
     pay_keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("💳 پرداخت با زرین‌پال", url=pay["startpay_url"])]]
@@ -179,8 +175,8 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     context.user_data["pay_message_id"] = sent.message_id
     await update.message.reply_text(
-        "⏳ Waiting for your payment — we detect it automatically.\n"
-        "You can cancel the order meanwhile:",
+        "⏳ در انتظار پرداخت شما هستیم؛ پرداخت به‌صورت خودکار تشخیص داده می‌شود.\n"
+        "در این مدت می‌توانید سفارش را لغو کنید:",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML",
     )
@@ -189,7 +185,7 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order_id = context.user_data.get("order_id")
     if not order_id:
-        await update.message.reply_text("❌ No pending order to cancel.")
+        await update.message.reply_text("❌ سفارش در انتظاری برای لغو وجود ندارد.")
         return
 
     async with async_session() as session:
@@ -214,7 +210,7 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data.pop("order_id", None)
     await update.message.reply_text(
-        f"❌ Order #{order_id} cancelled.",
+        f"❌ سفارش #{order_id} لغو شد.",
         reply_markup=home_keyboard(),
         parse_mode="HTML",
     )

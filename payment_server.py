@@ -57,14 +57,12 @@ async def _paid_cancelled_flow(application, session, order, authority, outcome) 
         )
         await _notify_admins(
             application,
-            f"⚠️ <b>Paid cancelled order!</b> Order #{oid} (ref "
-            f"<code>{outcome['ref_id']}</code>) was cancelled by the user but "
-            f"the payment went through and could not be auto-reversed: {exc}. "
-            "Refund or fulfill manually.",
+            f"⚠️ <b>پرداخت سفارش لغوشده!</b> سفارش #{oid} (کد پیگیری "
+            f"<code>{outcome['ref_id']}</code>) توسط کاربر لغو شده اما پرداخت آن انجام شد و استرداد خودکار ممکن نشد: {exc}. "
+            "لطفاً دستی رسیدگی کنید.",
         )
         await _notify(application, order.user.telegram_id,
-                      f"ℹ️ Order #{oid} had been cancelled, but its payment arrived. "
-                      "Our support team will contact you shortly.")
+                      f"ℹ️ سفارش #{oid} قبلاً لغو شده بود، اما پرداخت آن انجام شد؛ تیم پشتیبانی به‌زودی با شما تماس می‌گیرد.")
         return _page(
             "نیاز به بررسی",
             "سفارش قبلاً لغو شده اما پرداخت انجام شده است؛ تیم پشتیبانی با شما تماس می‌گیرد.",
@@ -74,12 +72,11 @@ async def _paid_cancelled_flow(application, session, order, authority, outcome) 
              oid, outcome["ref_id"])
     await _notify_admins(
         application,
-        f"ℹ️ Cancelled order #{oid} was paid anyway — payment auto-reversed "
-        f"(ref <code>{outcome['ref_id']}</code>).",
+        f"ℹ️ سفارش لغوشده #{oid} پرداخت شد — مبلغ به‌صورت خودکار مستردد شد "
+        f"(کد پیگیری <code>{outcome['ref_id']}</code>).",
     )
     await _notify(application, order.user.telegram_id,
-                  f"💳 Order #{oid} had been cancelled, so its payment was "
-                  "automatically reversed to your card.")
+                  f"💳 سفارش #{oid} قبلاً لغو شده بود؛ به همین دلیل مبلغ پرداختی به‌صورت خودکار به کارت شما بازگشت داده شد.")
     return _page(
         "مبلغ مستردد شد ✅",
         "سفارش لغو شده بود؛ مبلغ پرداختی به‌صورت خودکار به کارت شما بازگشت داده شد.",
@@ -133,8 +130,8 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
         except VPNPanelError as exc:
             log.error("Order #%s PAID but provisioning failed: %s", oid, exc)
             await _notify(application, chat_id,
-                          "✅ Your payment was received, but setting up your config hit a delay. "
-                          "We're on it — check My Profile shortly or contact support.")
+                          "✅ پرداخت شما دریافت شد، اما آماده‌سازی کانفیگ اندکی طول کشیده است. "
+                          "به‌زودی از بخش «👤 پروفایل من» بررسی کنید یا با پشتیبانی تماس بگیرید.")
             return _page("در حال بررسی", "پرداخت شما ثبت شد؛ فعال‌سازی چند دقیقه طول خواهد کشید.")
         except OrderAlreadyApproved:
             return _page("قبلاً تأیید شده", "این سفارش قبلاً تأیید و فعال شده است. به ربات برگردید. ✅")
@@ -153,8 +150,8 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
     ref = outcome["ref_id"]
     await _notify(
         application, chat_id,
-        f"🎉 <b>Your payment was confirmed!</b> (order #{oid})\n\n"
-        "Your VPN config is ready — check <b>👤 My Profile</b> in the bot.",
+        f"🎉 <b>پرداخت شما با موفقیت تأیید شد!</b> (سفارش #{oid})\n\n"
+        "کانفیگ شما آماده است؛ آن را از بخش «👤 پروفایل من» دریافت کنید.",
     )
     body = f"پرداخت با موفقیت تأیید شد (کد پیگیری: {ref}). به ربات برگردید و کانفیگ خود را دریافت کنید."
     return _page("پرداخت موفق ✅", body)
@@ -169,8 +166,8 @@ async def _notify(application, chat_id: int, text: str | None) -> None:
     try:
         if text is None:
             text = (
-                "🎉 <b>Your payment was confirmed!</b>\n\n"
-                "Your VPN config is ready — check <b>👤 My Profile</b> in the bot."
+                "🎉 <b>پرداخت شما با موفقیت تأیید شد!</b>\n\n"
+                "کانفیگ شما آماده است؛ آن را از بخش «👤 پروفایل من» دریافت کنید."
             )
         await application.bot.send_message(
             chat_id=chat_id, text=text, parse_mode="HTML",
