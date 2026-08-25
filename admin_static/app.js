@@ -174,9 +174,7 @@ function calcPrice(base, gb, manual) {
   if (gb === 0) return manual != null ? manual : 500000;
   const d = calcDiscount(gb);
   const raw = base * gb * (1 - d);
-  // .99 trick: just under round thousand (60,000 → 59,999)
-  const price = Math.floor(raw / 1000) * 1000 - 1;
-  return price < 999 ? 999 : price;
+  return Math.max(1000, Math.round(raw));
 }
 
 function cloneState(s) {
@@ -227,17 +225,38 @@ function renderPackages() {
 }
 
 function onPkgInput(e) {
-  const idx = parseInt(e.target.dataset.idx, 10);
-  const field = e.target.dataset.field;
-  let val = e.target.value;
+  const target = e.target;
+  const idx = parseInt(target.dataset.idx, 10);
+  const field = target.dataset.field;
+  const val = target.value;
+
+  // Preserve focus across rerender
+  const active = document.activeElement;
+  const activeIdx = active?.dataset?.idx;
+  const activeField = active?.dataset?.field;
+  const selStart = active?.selectionStart;
+  const selEnd = active?.selectionEnd;
+
   if (field === "label") packagesState.packages[idx][field] = val;
   else if (field === "data_gb") packagesState.packages[idx][field] = parseInt(val || "0", 10);
   else if (field === "price") packagesState.packages[idx][field] = parseInt(val || "0", 10);
 
-  // re-render prices if base or gb changed
-  if (field === "data_gb" || field === "price") {
-    // quick inline update for price column without full rerender
-    renderPackages();
+  // Live price preview without losing focus
+  if (field === "data_gb" || field === "label") {
+    const needsFull = field === "data_gb";
+    if (needsFull) {
+      renderPackages();
+      // restore focus to the same input
+      if (activeIdx !== undefined && activeField) {
+        const newInput = document.querySelector(`input[data-idx="${activeIdx}"][data-field="${activeField}"]`);
+        if (newInput) {
+          newInput.focus();
+          try {
+            if (selStart !== null && selEnd !== null) newInput.setSelectionRange(selStart, selEnd);
+          } catch {}
+        }
+      }
+    }
   }
 }
 

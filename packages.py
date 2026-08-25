@@ -27,9 +27,8 @@ def _calc_discount(gb: int) -> float:
 
 
 def calc_price(base_per_gb: int, data_gb: int, manual_price: int | None = None) -> int:
-    """Calculate price with discount + .99 trick (just under round thousand).
+    """Calculate price with discount (no .999 trick).
 
-    Example: base 6000*10=60000 raw → 59,999 (not 60,999) to look cheaper.
     Unlimited (0) uses manual_price.
     """
     if data_gb == 0:
@@ -39,15 +38,7 @@ def calc_price(base_per_gb: int, data_gb: int, manual_price: int | None = None) 
         return 500000
     discount = _calc_discount(data_gb)
     raw = base_per_gb * data_gb * (1 - discount)
-    # .99 trick: floor to next thousand then -1 (e.g. 60,000 → 59,999)
-    price = (int(raw) // 1000) * 1000 - 1
-    # If raw is exact thousand, the trick gives one below; if raw not exact, it floors then -1
-    # Ensure at least 999 and not below 0
-    # For raw <1000, floor is 0 → -1 would be negative, so clamp
-    if price < 999:
-        # For small values, use raw -1 floored? keep at least 999
-        price = max(999, int(raw) - 1 if raw >= 1000 else 999)
-    return price
+    return max(1000, round(raw))
 
 
 def _load_settings() -> dict:
