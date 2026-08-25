@@ -113,7 +113,9 @@ async def request_payment(order_id: int, amount_toomans: int, description: str) 
         raise ZarinpalError(_error_detail(data, 200, REQUEST_PATH))
     return {
         "authority": authority,
-        "startpay_url": f"{config.zarinpal_base_url}/pg/StartPay/{authority}",
+        # Use ZarinGate to bypass the intermediate checkout page (checkout.toodej.shop)
+        # Directly routes to Shaparak. Panel has no toggle to disable checkout.
+        "startpay_url": f"{config.zarinpal_base_url}/pg/StartPay/{authority}/ZarinGate",
     }
 
 
