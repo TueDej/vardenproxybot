@@ -142,14 +142,18 @@ def main():
     log.info("Bot is running...")
     if config.proxy_url_redacted:
         log.info("Proxy: %s", config.proxy_url_redacted)
-    if config.zarinpal_configured:
+    if config.zarinpal_access_token and config.zarinpal_callback_url:
         log.info(
             "Payments: Zarinpal (%s) | callback %s",
             "sandbox" if config.zarinpal_sandbox else "LIVE",
             config.zarinpal_callback_url,
         )
+    elif config.zarinpal_access_token:
+        log.warning("Payments: mock/manual mode — ZARINPAL_ACCESS_TOKEN is set but ZARINPAL_CALLBACK_URL is missing")
+    elif config.zarinpal_callback_url:
+        log.warning("Payments: mock/manual mode — ZARINPAL_CALLBACK_URL is set but ZARINPAL_ACCESS_TOKEN is missing")
     else:
-        log.info("Payments: mock/manual mode (ZARINPAL_ACCESS_TOKEN not set)")
+        log.info("Payments: mock/manual mode (no ZARINPAL_* configured)")
     if not VPNPanelService.is_configured():
         log.warning("3x-ui panel not configured; approvals will fail until PANEL_* vars are set.")
     else:
