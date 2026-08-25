@@ -9,7 +9,13 @@ from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
-from keyboards import home_keyboard, main_menu_keyboard, packages_keyboard, payment_keyboard
+from keyboards import (
+    cancel_keyboard,
+    home_keyboard,
+    main_menu_keyboard,
+    packages_keyboard,
+    payment_keyboard,
+)
 from models import Order, User
 from packages import DURATION_DAYS, PACKAGES
 from vpn_service import VPNPanelError, VPNPanelService
@@ -130,16 +136,17 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💰 Amount: <b>{pkg['price']:,} Toomans</b>\n\n"
             f"{separator}\n"
             "Tap the button below to pay securely via <b>Zarinpal</b>.\n"
-            "Your subscription is activated automatically after payment."
+            "✅ Your subscription is activated automatically right after payment — "
+            "no confirmation needed."
         )
         pay_keyboard = InlineKeyboardMarkup(
             [[InlineKeyboardButton("💳 پرداخت با زرین‌پال", url=pay["startpay_url"])]]
         )
         await update.message.reply_text(gateway_text, reply_markup=pay_keyboard, parse_mode="HTML")
         await update.message.reply_text(
-            "After paying you'll be brought back here and your config is delivered "
-            "automatically. If that doesn't happen, press ✅ I have paid:",
-            reply_markup=payment_keyboard(),
+            "⏳ Waiting for your payment — we detect it automatically.\n"
+            "You can cancel the order meanwhile:",
+            reply_markup=cancel_keyboard(),
             parse_mode="HTML",
         )
         return

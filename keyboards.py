@@ -36,5 +36,16 @@ def payment_keyboard():
     )
 
 
+def cancel_keyboard():
+    """Gateway flow: payment is detected automatically, so only cancel/home."""
+    return ReplyKeyboardMarkup(
+        [
+            ["❌ Cancel"],
+            HOME_BUTTON,
+        ],
+        resize_keyboard=True,
+    )
+
+
 def home_keyboard():
     return ReplyKeyboardMarkup([HOME_BUTTON], resize_keyboard=True)
