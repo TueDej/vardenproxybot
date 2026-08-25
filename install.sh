@@ -165,6 +165,16 @@ else
     prompt_var VPN_LIMIT_IP      "Devices per subscription"          "2"   false
     prompt_var PANEL_VERIFY_SSL  "Verify TLS cert? (true/false)"     "true" false
 
+    echo ""
+    echo -e "${BOLD}  Zarinpal Payment Gateway${NC}"
+    echo ""
+
+    prompt_var ZARINPAL_ACCESS_TOKEN "Merchant UUID (blank = mock payments)" ""      false
+    prompt_var ZARINPAL_SANDBOX      "Sandbox mode? (true/false)"            "false" false
+    prompt_var ZARINPAL_CALLBACK_URL "Public callback URL"                   ""      false
+    prompt_var ZARINPAL_BIND_HOST    "Callback bind host"                    "127.0.0.1" false
+    prompt_var ZARINPAL_BIND_PORT    "Callback bind port"                    "8099"  false
+
     cat > "$ENV_FILE" <<EOF
 # VardenProxy Bot environment — sourced by systemd
 # Generated $(date -Iseconds)
@@ -181,6 +191,11 @@ PANEL_API_TOKEN="$PANEL_API_TOKEN"
 XUI_INBOUND_ID="$XUI_INBOUND_ID"
 VPN_LIMIT_IP="$VPN_LIMIT_IP"
 PANEL_VERIFY_SSL="$PANEL_VERIFY_SSL"
+ZARINPAL_ACCESS_TOKEN="$ZARINPAL_ACCESS_TOKEN"
+ZARINPAL_SANDBOX="$ZARINPAL_SANDBOX"
+ZARINPAL_CALLBACK_URL="$ZARINPAL_CALLBACK_URL"
+ZARINPAL_BIND_HOST="${ZARINPAL_BIND_HOST:-127.0.0.1}"
+ZARINPAL_BIND_PORT="${ZARINPAL_BIND_PORT:-8099}"
 EOF
     chmod 600 "$ENV_FILE"
     chown "$CURRENT_USER:$CURRENT_GROUP" "$ENV_FILE"

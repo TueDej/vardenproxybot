@@ -36,6 +36,8 @@ class Order(Base):
     )  # pending, approved, rejected, cancelled
     panel_email: Mapped[str | None] = mapped_column(String(128), nullable=True)
     sub_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payment_authority: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payment_ref_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

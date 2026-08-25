@@ -13,6 +13,7 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
+import payment_server
 from config import config
 from database import init_db
 from handlers.admin import approve, pending, stats
@@ -51,6 +52,18 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except TelegramError:
             log.warning("Could not deliver error notice to the user.")
+
+
+async def _post_init(application: Application) -> None:
+    if config.zarinpal_configured:
+        runner = await payment_server.start_payment_server(application)
+        application.bot_data["payment_runner"] = runner
+
+
+async def _post_shutdown(application: Application) -> None:
+    runner = application.bot_data.get("payment_runner")
+    if runner:
+        await payment_server.stop_payment_server(runner)
 
 
 async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -109,6 +122,8 @@ def main():
         .request(request)
         .get_updates_request(request)
         .concurrent_updates(True)
+        .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
         .build()
     )
 
@@ -127,6 +142,14 @@ def main():
     log.info("Bot is running...")
     if config.proxy_url_redacted:
         log.info("Proxy: %s", config.proxy_url_redacted)
+    if config.zarinpal_configured:
+        log.info(
+            "Payments: Zarinpal (%s) | callback %s",
+            "sandbox" if config.zarinpal_sandbox else "LIVE",
+            config.zarinpal_callback_url,
+        )
+    else:
+        log.info("Payments: mock/manual mode (ZARINPAL_ACCESS_TOKEN not set)")
     if not VPNPanelService.is_configured():
         log.warning("3x-ui panel not configured; approvals will fail until PANEL_* vars are set.")
     else:

@@ -47,6 +47,13 @@ class Config:
     proxy_user: str = ""
     proxy_pass: str = ""
 
+    # Zarinpal payment gateway
+    zarinpal_access_token: str = ""  # merchant/terminal UUID
+    zarinpal_callback_url: str = ""
+    zarinpal_sandbox: bool = False
+    zarinpal_bind_host: str = "127.0.0.1"
+    zarinpal_bind_port: int = 8099
+
     def __post_init__(self):
         self.bot_token = os.getenv("BOT_TOKEN", "")
         admin_ids_str = os.getenv("ADMIN_IDS", "")
@@ -61,6 +68,13 @@ class Config:
         self.proxy_user = os.getenv("PROXY_USER", self.proxy_user)
         self.proxy_pass = os.getenv("PROXY_PASS", self.proxy_pass)
 
+        # Zarinpal payment gateway
+        self.zarinpal_access_token = os.getenv("ZARINPAL_ACCESS_TOKEN", "")
+        self.zarinpal_callback_url = os.getenv("ZARINPAL_CALLBACK_URL", "").rstrip("/")
+        self.zarinpal_sandbox = os.getenv("ZARINPAL_SANDBOX", "false").lower() == "true"
+        self.zarinpal_bind_host = os.getenv("ZARINPAL_BIND_HOST", self.zarinpal_bind_host)
+        self.zarinpal_bind_port = _int_env("ZARINPAL_BIND_PORT", self.zarinpal_bind_port)
+
         # 3x-ui panel settings
         self.panel_url = os.getenv("PANEL_URL", "").rstrip("/")
         self.panel_api_token = os.getenv("PANEL_API_TOKEN", "")
@@ -71,6 +85,16 @@ class Config:
     @property
     def panel_configured(self) -> bool:
         return bool(self.panel_url and self.panel_api_token and self.xui_inbound_id)
+
+    @property
+    def zarinpal_configured(self) -> bool:
+        return bool(self.zarinpal_access_token and self.zarinpal_callback_url)
+
+    @property
+    def zarinpal_base_url(self) -> str:
+        if self.zarinpal_sandbox:
+            return "https://sandbox.zarinpal.com"
+        return "https://payment.zarinpal.com"
 
     @property
     def proxy_url(self) -> str | None:

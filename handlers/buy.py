@@ -4,7 +4,7 @@ from html import escape
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from config import config
@@ -13,6 +13,7 @@ from keyboards import back_keyboard, packages_keyboard, payment_keyboard
 from models import Order, User
 from packages import DURATION_DAYS, PACKAGES
 from vpn_service import VPNPanelError, VPNPanelService
+from zarinpal import ZarinpalError, request_payment, verify_payment
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +92,58 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["order_id"] = order.id
 
+    if config.zarinpal_configured:
+        # Real gateway flow: create a payment session and hand the user the link.
+        try:
+            pay = await request_payment(
+                order.id, pkg["price"], f"VardenProxy subscription — {pkg['label']} (order #{order.id})"
+            )
+        except ZarinpalError as exc:
+            log.warning("Payment request for order #%s failed: %s", order.id, exc)
+            async with async_session() as session:
+                await session.execute(
+                    sa_update(Order).where(Order.id == order.id).values(status="cancelled")
+                )
+                await session.commit()
+            context.user_data.pop("order_id", None)
+            await update.message.reply_text(
+                "❌ <b>Could not start the payment.</b>\n"
+                "Please try again in a few minutes.\n"
+                f"<code>{escape(str(exc))}</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        async with async_session() as session:
+            await session.execute(
+                sa_update(Order)
+                .where(Order.id == order.id)
+                .values(payment_authority=pay["authority"])
+            )
+            await session.commit()
+
+        separator = "─" * 20
+        gateway_text = (
+            f"💳 <b>Order #{order.id}</b>\n\n"
+            f"📦 Package: {escape(pkg['label'])}\n"
+            f"📅 Duration: 1 Month\n"
+            f"💰 Amount: <b>{pkg['price']:,} Toomans</b>\n\n"
+            f"{separator}\n"
+            "Tap the button below to pay securely via <b>Zarinpal</b>.\n"
+            "Your subscription is activated automatically after payment."
+        )
+        pay_keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("💳 پرداخت با زرین‌پال", url=pay["startpay_url"])]]
+        )
+        await update.message.reply_text(gateway_text, reply_markup=pay_keyboard, parse_mode="HTML")
+        await update.message.reply_text(
+            "After paying you'll be brought back here and your config is delivered "
+            "automatically. If that doesn't happen, press ✅ I have paid:",
+            reply_markup=payment_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
     separator = "─" * 20
     payment_text = (
         f"💳 <b>Order #{order.id}</b>\n\n"
@@ -121,7 +174,45 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Order not found.")
             return
 
-        if config.auto_approve:
+        if config.zarinpal_configured and order.payment_authority:
+            # Gateway flow: verify server-side, then auto-approve.
+            oid = order.id  # snapshot — failures below expire ORM attrs
+            try:
+                outcome = await verify_and_fulfill_order(session, order)
+            except OrderAlreadyApproved:
+                context.user_data.pop("order_id", None)
+                await update.message.reply_text(
+                    f"✅ Order #{oid} was already approved.",
+                    reply_markup=back_keyboard(),
+                    parse_mode="HTML",
+                )
+                return
+            except ZarinpalError as exc:
+                await update.message.reply_text(
+                    "⏳ <b>Payment not confirmed yet.</b>\n"
+                    "Complete it via the Zarinpal link, or try again in a moment.\n"
+                    f"<code>{escape(str(exc))}</code>",
+                    parse_mode="HTML",
+                )
+                return
+            except VPNPanelError as exc:
+                await update.message.reply_text(
+                    f"❌ <b>Panel error</b> — your payment is recorded (order #{oid}) "
+                    f"but provisioning failed. Support has been notified; please try "
+                    f"My Profile again shortly.\n<code>{escape(str(exc))}</code>",
+                    parse_mode="HTML",
+                )
+                return
+            context.user_data.pop("order_id", None)
+            ref_line = f"\n🧾 Ref: <code>{escape(str(outcome['ref_id']))}</code>" if outcome["ref_id"] else ""
+            await update.message.reply_text(
+                f"✅ <b>Payment Confirmed!</b>\n\n"
+                f"Order #{oid} has been approved.{ref_line}\n"
+                f"Your VPN config is ready — check <b>👤 My Profile</b>.",
+                reply_markup=back_keyboard(),
+                parse_mode="HTML",
+            )
+        elif config.auto_approve:
             # Snapshot now — approve_order's rollback on failure expires ORM attrs.
             oid = order.id
             try:
@@ -179,6 +270,30 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=back_keyboard(),
         parse_mode="HTML",
     )
+
+
+async def verify_and_fulfill_order(session, order: Order) -> dict:
+    """Verify the Zarinpal transaction server-side and provision the VPN.
+
+    Returns {"ref_id", "card_pan", "already_done"} on success.
+    Raises:
+        ZarinpalError        — payment not verified (unpaid/cancelled/gateway error)
+        OrderAlreadyApproved — another handler claimed it first
+        VPNPanelError        — paid, but panel provisioning failed (order stays
+                               pending so a retry can complete it)
+    """
+    if not order.payment_authority:
+        raise ZarinpalError("Order has no payment authority.")
+    outcome = await verify_payment(order.payment_authority, order.amount_toomans)
+    await approve_order(session, order)
+    # approve_order committed; persist the reference separately (cosmetic).
+    order.payment_ref_id = str(outcome["ref_id"]) if outcome["ref_id"] is not None else None
+    session.add(order)  # re-attach in case approve_order's rollback detached it
+    try:
+        await session.commit()
+    except Exception:  # ref persistence must never fail an approved order
+        log.warning("Could not store payment_ref_id for order #%s", order.id, exc_info=True)
+    return outcome
 
 
 async def approve_order(session, order: Order) -> dict:

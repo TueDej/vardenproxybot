@@ -35,3 +35,9 @@ def _migrate_sync(sync_conn) -> None:
         if "sub_id" not in cols:
             sync_conn.exec_driver_sql("ALTER TABLE orders ADD COLUMN sub_id VARCHAR(64)")
             log.info("Added orders.sub_id")
+        if "payment_authority" not in cols:
+            sync_conn.exec_driver_sql("ALTER TABLE orders ADD COLUMN payment_authority VARCHAR(64)")
+            log.info("Added orders.payment_authority")
+        if "payment_ref_id" not in cols:
+            sync_conn.exec_driver_sql("ALTER TABLE orders ADD COLUMN payment_ref_id VARCHAR(32)")
+            log.info("Added orders.payment_ref_id")

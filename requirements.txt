@@ -4,3 +4,4 @@ SQLAlchemy>=2.0.37
 aiosqlite==0.20.0
 python-dotenv==1.0.1
 httpx[socks]>=0.27
+aiohttp>=3.9
