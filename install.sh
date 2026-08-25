@@ -257,6 +257,43 @@ pre_flight() {
 
 # ─── 3. Deploy source ────────────────────────────────────────────────────
 
+prompt_db_wipe() {
+    # Offer to wipe existing DB files with double confirmation. Returns 0 if wiped, 1 if kept.
+    if [[ ${#DB_FILES[@]} -eq 0 ]]; then
+        return 1
+    fi
+    # Allow non-interactive opt-in via env: VARDEN_WIPE_DB=1
+    if [[ "${VARDEN_WIPE_DB:-}" == "1" || "${VARDEN_WIPE_DB:-}" == "true" ]]; then
+        warn "VARDEN_WIPE_DB is set — removing ${#DB_FILES[@]} database file(s) without prompt."
+        return 0
+    fi
+    if ! is_interactive; then
+        info "Keeping existing database file(s) (${#DB_FILES[@]} found) — non-interactive mode."
+        return 1
+    fi
+    echo ""
+    echo -e "${YELLOW}${BOLD}  Existing database found:${NC}"
+    for db in "${DB_FILES[@]}"; do
+        size=$(du -h "$db" 2>/dev/null | cut -f1)
+        echo -e "    ${DIM}$db (${size:-?})${NC}"
+    done
+    echo ""
+    local ans1 ans2
+    read -rp "  Remove all current DB files and start fresh? (yes/no) [no]: " ans1 || ans1=""
+    ans1=$(echo "$ans1" | tr '[:upper:]' '[:lower:]' | xargs 2>/dev/null || echo "$ans1")
+    if [[ "$ans1" != "yes" && "$ans1" != "y" ]]; then
+        info "Keeping existing database."
+        return 1
+    fi
+    echo -e "${RED}${BOLD}  This will PERMANENTLY delete the database(s) listed above!${NC}"
+    read -rp "  Type DELETE to confirm: " ans2 || ans2=""
+    if [[ "$ans2" != "DELETE" ]]; then
+        info "Confirmation did not match — keeping database."
+        return 1
+    fi
+    return 0
+}
+
 deploy_source() {
     step "Deploying"
 
@@ -268,7 +305,18 @@ deploy_source() {
         done < <(find "$INSTALL_DIR" -maxdepth 1 -type f \( -name "*.db" -o -name "*.sqlite3" -o -name "*.sqlite" \) -print0 2>/dev/null)
     fi
 
-    if [[ ${#DB_FILES[@]} -gt 0 ]]; then
+    WIPE_DB=false
+    if prompt_db_wipe; then
+        WIPE_DB=true
+        # Remove DB files now; skip backup/restore
+        for db in "${DB_FILES[@]}"; do
+            rm -f "$db" 2>/dev/null || true
+            # Also remove WAL/SHM sidecars if present
+            rm -f "${db}-wal" "${db}-shm" 2>/dev/null || true
+        done
+        log "Removed ${#DB_FILES[@]} database file(s) — fresh start."
+        DB_FILES=()
+    elif [[ ${#DB_FILES[@]} -gt 0 ]]; then
         BACKUP_DIR="$(mktemp -d /tmp/vardenproxybot_db_backup_XXXXXX)"
         chmod 700 "$BACKUP_DIR" 2>/dev/null || true
         for db in "${DB_FILES[@]}"; do
