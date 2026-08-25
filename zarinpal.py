@@ -4,7 +4,7 @@ Authentication uses the merchant/terminal UUID supplied via
 ZARINPAL_ACCESS_TOKEN. All requests use a direct connection — gateway
 traffic must never traverse the SOCKS proxy used for Telegram.
 """
-
+import asyncio
 import logging
 from typing import Any
 
@@ -52,28 +52,40 @@ def _error_detail(data: Any, status_code: int, path: str) -> str:
     return "; ".join(msgs) or f"HTTP {status_code}"
 
 
-async def _post(path: str, payload: dict) -> dict:
-    """POST JSON to the gateway and return the decoded response object."""
-    try:
-        async with httpx.AsyncClient(trust_env=False, timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                f"{config.zarinpal_base_url}{path}",
-                json=payload,
-                headers={"Accept": "application/json", "Content-Type": "application/json"},
-            )
-    except httpx.HTTPError as exc:
-        raise ZarinpalError(f"Gateway unreachable [{path}]: {exc}") from exc
+async def _post(path: str, payload: dict, retries: int = 3) -> dict:
+    """POST JSON to the gateway and return the decoded response object.
 
-    try:
-        data = resp.json()
-    except ValueError as exc:
-        snippet = " ".join((resp.text or "").split())[:160]
-        raise ZarinpalError(f"Non-JSON response (HTTP {resp.status_code}) [{path}]: {snippet}") from exc
+    Connection-level failures (DNS, timeouts, resets) are retried with a
+    short backoff so transient blips don't kill the order flow.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            async with httpx.AsyncClient(trust_env=False, timeout=_TIMEOUT) as client:
+                resp = await client.post(
+                    f"{config.zarinpal_base_url}{path}",
+                    json=payload,
+                    headers={"Accept": "application/json", "Content-Type": "application/json"},
+                )
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            log.warning("Gateway %s attempt %d/%d failed: %s", path, attempt, retries, exc)
+            if attempt < retries:
+                await asyncio.sleep(0.5 * attempt)
+            continue
 
-    if not isinstance(data, dict):
-        raise ZarinpalError(f"Unexpected response shape [{path}] (HTTP {resp.status_code})")
-    log.debug("Zarinpal %s -> %s", path, data)
-    return data
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            snippet = " ".join((resp.text or "").split())[:160]
+            raise ZarinpalError(f"Non-JSON response (HTTP {resp.status_code}) [{path}]: {snippet}") from exc
+
+        if not isinstance(data, dict):
+            raise ZarinpalError(f"Unexpected response shape [{path}] (HTTP {resp.status_code})")
+        log.debug("Zarinpal %s -> %s", path, data)
+        return data
+
+    raise ZarinpalError(f"Gateway unreachable [{path}]: {last_exc}")
 
 
 async def request_payment(order_id: int, amount_toomans: int, description: str) -> dict:
