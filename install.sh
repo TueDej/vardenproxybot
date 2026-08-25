@@ -54,6 +54,8 @@ VAR_SPEC=(
     "ZARINPAL_CALLBACK_URL|Public payment callback URL (https://pay.example/zarinpal/callback)||false"
     "ZARINPAL_BIND_HOST|Payment callback bind host|127.0.0.1|false"
     "ZARINPAL_BIND_PORT|Payment callback bind port|8099|false"
+    "ADMIN_PANEL_USER|Admin panel username|admin|false"
+    "ADMIN_PANEL_PASS|Admin panel password (BasicAuth)||false"
 )
 
 VAR_ORDER=()
@@ -188,6 +190,20 @@ configure_environment() {
 
     load_var_spec
     collect_missing_vars
+
+    # Auto-generate ADMIN_PANEL_PASS if still empty (secure default)
+    if [[ -z "${ADMIN_PANEL_PASS:-}" ]]; then
+        if command -v openssl &>/dev/null; then
+            ADMIN_PANEL_PASS="$(openssl rand -base64 32 | tr -d '\n' | tr -d '\r')"
+        else
+            ADMIN_PANEL_PASS="$(head -c 24 /dev/urandom | base64 | tr -d '\n')"
+        fi
+        # Ensure it's tracked for writing if not already
+        if [[ ! " ${TO_WRITE[*]} " =~ " ADMIN_PANEL_PASS " ]]; then
+            TO_WRITE+=("ADMIN_PANEL_PASS")
+        fi
+        info "Generated ADMIN_PANEL_PASS (BasicAuth)"
+    fi
 
     if [[ ${#TO_WRITE[@]} -eq 0 ]]; then
         log "Environment file complete: $ENV_FILE"

@@ -49,6 +49,10 @@ class Config:
     zarinpal_bind_host: str = "127.0.0.1"
     zarinpal_bind_port: int = 8099
 
+    # Admin panel (BasicAuth, served on same HTTP server)
+    admin_panel_user: str = "admin"
+    admin_panel_pass: str = ""
+
     def __post_init__(self):
         self.bot_token = os.getenv("BOT_TOKEN", "")
         admin_ids_str = os.getenv("ADMIN_IDS", "")
@@ -74,6 +78,10 @@ class Config:
         self.zarinpal_sandbox = os.getenv("ZARINPAL_SANDBOX", "false").strip().lower() == "true"
         self.zarinpal_bind_host = os.getenv("ZARINPAL_BIND_HOST", self.zarinpal_bind_host)
         self.zarinpal_bind_port = _int_env("ZARINPAL_BIND_PORT", self.zarinpal_bind_port)
+
+        # Admin panel
+        self.admin_panel_user = os.getenv("ADMIN_PANEL_USER", self.admin_panel_user)
+        self.admin_panel_pass = os.getenv("ADMIN_PANEL_PASS", self.admin_panel_pass)
 
         # 3x-ui panel settings
         self.panel_url = os.getenv("PANEL_URL", "").rstrip("/")
@@ -127,6 +135,10 @@ class Config:
         if parts.username:
             netloc = f"{parts.username}:***@{netloc}"
         return parts._replace(netloc=netloc).geturl()
+
+    @property
+    def admin_panel_enabled(self) -> bool:
+        return bool(self.admin_panel_user and self.admin_panel_pass)
 
 
 config = Config()

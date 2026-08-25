@@ -1,27 +1,33 @@
-"""Internal HTTP server receiving Zarinpal payment callbacks.
+"""Internal HTTP server receiving Zarinpal payment callbacks + admin panel.
 
 Binds to a loopback address only; a reverse proxy (Caddy/nginx) terminates
 TLS on the public domain and forwards here.
 """
 
+import base64
+import hashlib
+import hmac
 import logging
+import pathlib
+from datetime import datetime, timezone
 from html import escape
 
 from aiohttp import web
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from config import config
 from database import async_session
 from keyboards import main_menu_keyboard
 from handlers.buy import OrderAlreadyApproved, OrderNotApprovable, verify_and_fulfill_order
-from models import Order
+from models import Order, User
 from vpn_service import VPNPanelError
 from zarinpal import ZarinpalError, reverse_payment, verify_payment
 
 log = logging.getLogger(__name__)
 
 CALLBACK_PATH = "/zarinpal/callback"
+ADMIN_PREFIX = "/admin"
 
 _PAGE = """<!DOCTYPE html>
 <html lang="fa"><head><meta charset="utf-8">
@@ -38,6 +44,276 @@ def _page(title: str, body: str) -> web.Response:
         text=_PAGE.format(title=escape(title), body=escape(body)),
         content_type="text/html",
     )
+
+
+# ── BasicAuth helpers ───────────────────────────────────────────────
+
+def _is_admin_authenticated(request: web.Request) -> bool:
+    if not config.admin_panel_enabled:
+        return False
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(auth[6:].strip()).decode("utf-8", errors="strict")
+    except Exception:
+        return False
+    if ":" not in decoded:
+        return False
+    user, pwd = decoded.split(":", 1)
+    # constant-time compare
+    user_ok = hmac.compare_digest(user, config.admin_panel_user)
+    pass_ok = hmac.compare_digest(pwd, config.admin_panel_pass)
+    return user_ok and pass_ok
+
+
+def _admin_auth_required_response() -> web.Response:
+    headers = {"WWW-Authenticate": 'Basic realm="Varden Admin"'}
+    return web.Response(status=401, text="Authentication required", headers=headers)
+
+
+@web.middleware
+async def admin_auth_middleware(request: web.Request, handler):
+    if request.path.startswith(ADMIN_PREFIX):
+        if not config.admin_panel_enabled:
+            return web.Response(status=503, text="Admin panel not configured (ADMIN_PANEL_USER/PASS missing)")
+        if not _is_admin_authenticated(request):
+            return _admin_auth_required_response()
+    return await handler(request)
+
+
+# ── Admin API ─────────────────────────────────────────────────────────
+
+async def handle_admin_stats(request: web.Request) -> web.Response:
+    async with async_session() as session:
+        # total orders
+        total_orders = (await session.execute(select(func.count(Order.id)))).scalar() or 0
+        # by status
+        status_rows = (await session.execute(select(Order.status, func.count(Order.id)).group_by(Order.status))).all()
+        by_status = {row[0]: row[1] for row in status_rows}
+        # total revenue approved only
+        total_revenue = (await session.execute(select(func.coalesce(func.sum(Order.amount_toomans), 0)).where(Order.status == "approved"))).scalar() or 0
+        # total users
+        total_users = (await session.execute(select(func.count(User.id)))).scalar() or 0
+        # today revenue / pending
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_orders = (await session.execute(select(func.count(Order.id)).where(Order.created_at >= today_start))).scalar() or 0
+        pending = by_status.get("pending", 0)
+    return web.json_response({
+        "total_orders": total_orders,
+        "by_status": by_status,
+        "total_revenue": total_revenue,
+        "total_users": total_users,
+        "today_orders": today_orders,
+        "pending": pending,
+    })
+
+
+def _parse_pagination(request: web.Request) -> tuple[int, int]:
+    try:
+        page = max(1, int(request.rel_url.query.get("page", "1")))
+    except ValueError:
+        page = 1
+    try:
+        limit = int(request.rel_url.query.get("limit", "50"))
+    except ValueError:
+        limit = 50
+    limit = max(1, min(limit, 100))
+    return page, limit
+
+
+def _parse_date_param(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    s = s.strip()
+    if not s:
+        return None
+    # Accept YYYY-MM-DD or ISO
+    try:
+        if "T" in s:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        else:
+            dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
+async def handle_admin_orders(request: web.Request) -> web.Response:
+    q = (request.rel_url.query.get("q") or "").strip()
+    status = (request.rel_url.query.get("status") or "").strip()
+    package = (request.rel_url.query.get("package") or "").strip()
+    from_s = _parse_date_param(request.rel_url.query.get("from"))
+    to_s = _parse_date_param(request.rel_url.query.get("to"))
+    sort = (request.rel_url.query.get("sort") or "created_at.desc").strip()
+    page, limit = _parse_pagination(request)
+
+    async with async_session() as session:
+        base = select(Order).options(selectinload(Order.user))
+        # Join User for search on telegram_id/username - use outer join to keep orders even if user missing? inner is fine.
+        # We'll build conditions including User fields via exists subquery to avoid join duplication complexity
+        # Simpler: join
+        need_user_join = bool(q)
+        if need_user_join:
+            base = base.join(User, Order.user_id == User.id)
+
+        conditions = []
+        if status and status in ("pending", "approved", "rejected", "cancelled"):
+            conditions.append(Order.status == status)
+        if package:
+            conditions.append(Order.package_label == package)
+        if from_s:
+            conditions.append(Order.created_at >= from_s)
+        if to_s:
+            conditions.append(Order.created_at <= to_s)
+        if q:
+            like = f"%{q}%"
+            # For telegram_id numeric exact match
+            or_parts = [
+                Order.payment_ref_id.ilike(like),
+                Order.payment_authority.ilike(like),
+                Order.panel_email.ilike(like),
+                Order.sub_id.ilike(like),
+                Order.package_label.ilike(like),
+            ]
+            if need_user_join:
+                or_parts.extend([
+                    User.username.ilike(like),
+                    User.first_name.ilike(like),
+                ])
+                # telegram_id as string
+                if q.isdigit():
+                    try:
+                        tid = int(q)
+                        or_parts.append(User.telegram_id == tid)
+                        or_parts.append(Order.id == tid)
+                    except ValueError:
+                        pass
+            conditions.append(or_(*or_parts))
+
+        if conditions:
+            base = base.where(and_(*conditions))
+
+        # sort
+        if sort == "created_at.asc":
+            base = base.order_by(Order.created_at.asc())
+        elif sort == "amount.desc":
+            base = base.order_by(Order.amount_toomans.desc())
+        elif sort == "amount.asc":
+            base = base.order_by(Order.amount_toomans.asc())
+        else:
+            base = base.order_by(Order.created_at.desc())
+
+        # count
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await session.execute(count_q)).scalar() or 0
+
+        # pagination
+        base = base.offset((page - 1) * limit).limit(limit)
+        result = await session.execute(base)
+        orders = result.scalars().unique().all()
+
+        items = []
+        for o in orders:
+            try:
+                username = o.user.username if hasattr(o, "user") and o.user else None
+                telegram_id = o.user.telegram_id if hasattr(o, "user") and o.user else None
+                first_name = o.user.first_name if hasattr(o, "user") and o.user else None
+            except Exception:
+                username = None
+                telegram_id = None
+                first_name = None
+            items.append({
+                "id": o.id,
+                "user_id": o.user_id,
+                "telegram_id": telegram_id,
+                "username": username,
+                "first_name": first_name,
+                "package_label": o.package_label,
+                "duration_days": o.duration_days,
+                "data_gb": o.data_gb,
+                "amount_toomans": o.amount_toomans,
+                "status": o.status,
+                "panel_email": o.panel_email,
+                "sub_id": o.sub_id,
+                "payment_authority": o.payment_authority,
+                "payment_ref_id": o.payment_ref_id,
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+            })
+
+        return web.json_response({"total": total, "page": page, "limit": limit, "items": items})
+
+
+async def handle_admin_users(request: web.Request) -> web.Response:
+    q = (request.rel_url.query.get("q") or "").strip()
+    from_s = _parse_date_param(request.rel_url.query.get("from"))
+    to_s = _parse_date_param(request.rel_url.query.get("to"))
+    page, limit = _parse_pagination(request)
+
+    async with async_session() as session:
+        base = select(User)
+        conditions = []
+        if from_s:
+            conditions.append(User.created_at >= from_s)
+        if to_s:
+            conditions.append(User.created_at <= to_s)
+        if q:
+            like = f"%{q}%"
+            or_parts = [
+                User.username.ilike(like),
+                User.first_name.ilike(like),
+            ]
+            if q.isdigit():
+                try:
+                    tid = int(q)
+                    or_parts.append(User.telegram_id == tid)
+                    or_parts.append(User.id == tid)
+                except ValueError:
+                    pass
+            conditions.append(or_(*or_parts))
+        if conditions:
+            base = base.where(and_(*conditions))
+        base = base.order_by(User.created_at.desc())
+
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await session.execute(count_q)).scalar() or 0
+
+        base = base.offset((page - 1) * limit).limit(limit)
+        result = await session.execute(base)
+        users = result.scalars().all()
+
+        # For each user, count orders (could be optimized with subquery, but keep simple)
+        items = []
+        for u in users:
+            order_count = (await session.execute(select(func.count(Order.id)).where(Order.user_id == u.id))).scalar() or 0
+            items.append({
+                "id": u.id,
+                "telegram_id": u.telegram_id,
+                "username": u.username,
+                "first_name": u.first_name,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+                "order_count": order_count,
+            })
+        return web.json_response({"total": total, "page": page, "limit": limit, "items": items})
+
+
+# ── Admin static ────────────────────────────────────────────────────
+
+def _admin_static_dir() -> pathlib.Path:
+    # payment_server.py is in project root, admin_static is sibling dir
+    return pathlib.Path(__file__).parent / "admin_static"
+
+
+async def handle_admin_index(request: web.Request) -> web.Response:
+    # Already authenticated via middleware
+    static_dir = _admin_static_dir()
+    index_path = static_dir / "index.html"
+    if index_path.exists():
+        return web.FileResponse(index_path)
+    # Fallback inline if files not deployed yet
+    return web.Response(text="<h1>Admin panel not deployed</h1><p>admin_static/index.html missing</p>", content_type="text/html")
 
 
 async def _paid_cancelled_flow(application, _session, order, authority, outcome) -> web.Response:
@@ -203,10 +479,20 @@ async def handle_health(request: web.Request) -> web.Response:
 
 
 def build_app(application) -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[admin_auth_middleware])
     app["ptb_application"] = application
     app.router.add_get(CALLBACK_PATH, handle_zarinpal_callback)
     app.router.add_get("/healthz", handle_health)
+    # Admin panel (protected by BasicAuth middleware)
+    app.router.add_get(ADMIN_PREFIX, handle_admin_index)
+    app.router.add_get(ADMIN_PREFIX + "/", handle_admin_index)
+    app.router.add_get(ADMIN_PREFIX + "/api/stats", handle_admin_stats)
+    app.router.add_get(ADMIN_PREFIX + "/api/orders", handle_admin_orders)
+    app.router.add_get(ADMIN_PREFIX + "/api/users", handle_admin_users)
+    # Static files for admin UI
+    static_dir = _admin_static_dir()
+    if static_dir.exists():
+        app.router.add_static(ADMIN_PREFIX + "/static/", path=static_dir, name="admin_static")
     return app
 
 
@@ -220,6 +506,10 @@ async def start_payment_server(application) -> web.AppRunner:
         "Payment callback listening on http://%s:%s%s",
         config.zarinpal_bind_host, config.zarinpal_bind_port, CALLBACK_PATH,
     )
+    if config.admin_panel_enabled:
+        log.info("Admin panel at http://%s:%s%s (user=%s)", config.zarinpal_bind_host, config.zarinpal_bind_port, ADMIN_PREFIX, config.admin_panel_user)
+    else:
+        log.warning("Admin panel disabled: set ADMIN_PANEL_USER and ADMIN_PANEL_PASS")
     return runner
 
 

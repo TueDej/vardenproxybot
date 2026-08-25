@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varden Admin</title>
+<link rel="stylesheet" href="/admin/static/style.css">
+</head>
+<body>
+<div class="container">
+  <header class="header">
+    <h1>Varden<span>Admin</span></h1>
+    <div class="header-actions">
+      <span id="auth-status" class="muted">protected • BasicAuth</span>
+    </div>
+  </header>
+
+  <section id="stats" class="stats-grid">
+    <div class="card"><div class="card-label">Total Orders</div><div class="card-value" id="stat-total">—</div></div>
+    <div class="card"><div class="card-label">Pending</div><div class="card-value amber" id="stat-pending">—</div></div>
+    <div class="card"><div class="card-label">Approved</div><div class="card-value emerald" id="stat-approved">—</div></div>
+    <div class="card"><div class="card-label">Revenue</div><div class="card-value" id="stat-revenue">—</div></div>
+    <div class="card"><div class="card-label">Users</div><div class="card-value" id="stat-users">—</div></div>
+    <div class="card"><div class="card-label">Today</div><div class="card-value" id="stat-today">—</div></div>
+  </section>
+
+  <section class="toolbar">
+    <div class="search-wrap">
+      <input id="q" type="search" placeholder="Search everything: ref, authority, email, telegram id, username…" autocomplete="off">
+    </div>
+    <select id="status">
+      <option value="">All status</option>
+      <option value="pending">pending</option>
+      <option value="approved">approved</option>
+      <option value="cancelled">cancelled</option>
+      <option value="rejected">rejected</option>
+    </select>
+    <select id="package">
+      <option value="">All packages</option>
+    </select>
+    <input id="from" type="date" title="From">
+    <input id="to" type="date" title="To">
+    <button id="apply" class="btn primary">Filter</button>
+    <button id="clear" class="btn">Clear</button>
+  </section>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="orders">Orders</button>
+    <button class="tab" data-tab="users">Users</button>
+  </nav>
+
+  <section id="orders-panel" class="panel">
+    <div class="table-wrap">
+      <table id="orders-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>User</th>
+            <th>Package</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Ref ID</th>
+            <th>Authority</th>
+            <th>Panel Email</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody id="orders-body"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="orders-pag"></div>
+  </section>
+
+  <section id="users-panel" class="panel hidden">
+    <div class="table-wrap">
+      <table id="users-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Telegram ID</th>
+            <th>Username</th>
+            <th>Name</th>
+            <th>Orders</th>
+            <th>Joined</th>
+          </tr>
+        </thead>
+        <tbody id="users-body"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="users-pag"></div>
+  </section>
+
+  <footer class="footer muted">VardenProxy • Admin panel • Read-only • Search indexes status/authority/ref</footer>
+</div>
+<script src="/admin/static/app.js"></script>
+</body>
+</html>
