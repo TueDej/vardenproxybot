@@ -21,7 +21,6 @@ from handlers.buy import (
     buy_start,
     cancel_order,
     package_selected,
-    payment_confirmed,
 )
 from handlers.profile import profile
 from handlers.start import help_command, start
@@ -87,8 +86,6 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Buy flow
     elif text.endswith("Toomans"):
         await package_selected(update, context)
-    elif text == "✅ I have paid":
-        await payment_confirmed(update, context)
     elif text == "❌ Cancel":
         await cancel_order(update, context)
 

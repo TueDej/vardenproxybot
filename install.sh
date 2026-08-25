@@ -36,7 +36,6 @@ info()     { echo -e "  ${DIM}$*${NC}"; }
 VAR_SPEC=(
     "BOT_TOKEN|Telegram Bot Token||true"
     "ADMIN_IDS|Admin Telegram IDs (comma-sep)||true"
-    "AUTO_APPROVE|Auto-approve mock payments? (true/false)|false|false"
     "PROXY_HOST|SOCKS5 Proxy Host|127.0.0.1|false"
     "PROXY_PORT|SOCKS5 Proxy Port|1080|false"
     "PROXY_USER|SOCKS5 Proxy Username (optional)||false"

@@ -17,7 +17,7 @@ from keyboards import main_menu_keyboard
 from handlers.buy import OrderAlreadyApproved, verify_and_fulfill_order
 from models import Order
 from vpn_service import VPNPanelError
-from zarinpal import ZarinpalError
+from zarinpal import ZarinpalError, verify_payment
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +66,36 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
         if order.status == "approved":
             return _page("قبلاً تأیید شده", "این سفارش قبلاً تأیید و فعال شده است. به ربات برگردید. ✅")
 
+        if order.status != "pending":
+            # Cancelled/rejected before the money landed. The StartPay link
+            # itself can't be revoked, so check whether the user paid anyway
+            # and escalate to support when they did.
+            try:
+                outcome = await verify_payment(order.payment_authority, order.amount_toomans)
+            except ZarinpalError:
+                return _page(
+                    "سفارش لغو شده",
+                    "این سفارش لغو شده و وجهی بابت آن پرداخت نشده است. در صورت نیاز دوباره خرید کنید.",
+                )
+            log.error(
+                "Order #%s was CANCELLED but payment succeeded (ref %s) — needs refund/handling!",
+                oid, outcome["ref_id"],
+            )
+            await _notify_admins(
+                application,
+                f"⚠️ <b>Paid cancelled order!</b> Order #{oid} (authority "
+                f"<code>{escape(authority)}</code>, ref <code>{outcome['ref_id']}</code>) "
+                "was cancelled by the user but the payment went through. "
+                "Refund or fulfill manually.",
+            )
+            await _notify(application, chat_id,
+                          f"ℹ️ Order #{oid} had been cancelled, but its payment arrived. "
+                          "Our support team will contact you shortly.")
+            return _page(
+                "نیاز به بررسی",
+                "سفارش قبلاً لغو شده اما پرداخت انجام شده است؛ تیم پشتیبانی با شما تماس می‌گیرد.",
+            )
+
         try:
             outcome = await verify_and_fulfill_order(session, order)
         except ZarinpalError as exc:
@@ -93,8 +123,8 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
 async def _notify(application, chat_id: int, text: str | None) -> None:
     """Best-effort Telegram notification about the completed payment.
 
-    Attaches the main-menu keyboard so the stale ✅ I have paid / ❌ Cancel
-    buttons are replaced once payment is settled.
+    Attaches the main-menu keyboard so leftover pre-payment buttons are
+    replaced once payment is settled.
     """
     try:
         if text is None:
@@ -108,6 +138,15 @@ async def _notify(application, chat_id: int, text: str | None) -> None:
         )
     except Exception:
         log.warning("Could not notify user %s about completed payment", chat_id, exc_info=True)
+
+
+async def _notify_admins(application, text: str) -> None:
+    """Best-effort alert to every configured admin."""
+    for admin_id in config.admin_ids:
+        try:
+            await application.bot.send_message(chat_id=admin_id, text=text, parse_mode="HTML")
+        except Exception:
+            log.warning("Could not alert admin %s", admin_id, exc_info=True)
 
 
 async def handle_health(request: web.Request) -> web.Response:

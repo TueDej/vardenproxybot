@@ -25,17 +25,6 @@ def packages_keyboard():
     return ReplyKeyboardMarkup(_package_buttons(), resize_keyboard=True)
 
 
-def payment_keyboard():
-    return ReplyKeyboardMarkup(
-        [
-            ["✅ I have paid"],
-            ["❌ Cancel"],
-            HOME_BUTTON,
-        ],
-        resize_keyboard=True,
-    )
-
-
 def cancel_keyboard():
     """Gateway flow: payment is detected automatically, so only cancel/home."""
     return ReplyKeyboardMarkup(
