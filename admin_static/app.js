@@ -193,6 +193,8 @@ async function loadPackages() {
   }
 }
 
+let dragIdx = null;
+
 function renderPackages() {
   if (!packagesState) return;
   $("#base-price").value = packagesState.base_price_per_gb;
@@ -207,7 +209,8 @@ function renderPackages() {
           ? `<input type="number" data-idx="${idx}" data-field="price" value="${p.price}" min="1000" max="10000000" step="1000">`
           : `<span>${fmtAmount(price)}</span> <span class="muted small">[${disc} off]</span>`;
       return `
-      <tr data-idx="${idx}">
+      <tr data-idx="${idx}" draggable="true">
+        <td class="drag-handle" title="Drag to reorder">⋮⋮</td>
         <td><input type="text" data-idx="${idx}" data-field="label" value="${escapeHtml(p.label)}" placeholder="10GB"></td>
         <td><input type="number" data-idx="${idx}" data-field="data_gb" value="${p.data_gb}" min="0" max="10000" step="1"></td>
         <td class="muted">${disc}</td>
@@ -221,6 +224,43 @@ function renderPackages() {
   // live recalc on base change
   tbody.querySelectorAll('input').forEach((inp) => {
     inp.addEventListener('input', onPkgInput);
+  });
+
+  // drag & drop for reordering
+  tbody.querySelectorAll('tr').forEach((tr) => {
+    tr.addEventListener('dragstart', (e) => {
+      dragIdx = parseInt(tr.dataset.idx, 10);
+      tr.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      // Required for Firefox
+      e.dataTransfer.setData('text/plain', String(dragIdx));
+      // Delay hide
+      setTimeout(() => (tr.style.opacity = '0.4'), 0);
+    });
+    tr.addEventListener('dragend', () => {
+      tr.classList.remove('dragging');
+      tr.style.opacity = '';
+      dragIdx = null;
+      tbody.querySelectorAll('tr').forEach((r) => r.classList.remove('drag-over'));
+    });
+    tr.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      tr.classList.add('drag-over');
+    });
+    tr.addEventListener('dragleave', () => {
+      tr.classList.remove('drag-over');
+    });
+    tr.addEventListener('drop', (e) => {
+      e.preventDefault();
+      tr.classList.remove('drag-over');
+      const targetIdx = parseInt(tr.dataset.idx, 10);
+      if (dragIdx === null || targetIdx === dragIdx) return;
+      const [moved] = packagesState.packages.splice(dragIdx, 1);
+      // Insert at drop target position
+      const insertAt = Math.max(0, Math.min(targetIdx, packagesState.packages.length));
+      packagesState.packages.splice(insertAt, 0, moved);
+      renderPackages();
+    });
   });
 }
 
@@ -247,8 +287,8 @@ function onPkgInput(e) {
     // Update discount and price cells inline without destroying focused input
     const row = target.closest("tr");
     if (row) {
-      const discCell = row.cells[2];
-      const priceCell = row.cells[3];
+      const discCell = row.cells[3];
+      const priceCell = row.cells[4];
       const gb = packagesState.packages[idx].data_gb;
       const disc = gb === 0 ? "—" : (calcDiscount(gb) * 100).toFixed(1) + "%";
       discCell.textContent = disc;
@@ -302,8 +342,8 @@ $("#base-price")?.addEventListener("input", () => {
     const p = packagesState.packages[idx];
     if (!p) return;
     const disc = p.data_gb === 0 ? "—" : (calcDiscount(p.data_gb) * 100).toFixed(1) + "%";
-    row.cells[2].textContent = disc;
-    const priceCell = row.cells[3];
+    row.cells[3].textContent = disc;
+    const priceCell = row.cells[4];
     if (p.data_gb === 0) return; // manual price, keep input
     const price = calcPrice(base, p.data_gb);
     priceCell.innerHTML = `<span>${fmtAmount(price)}</span> <span class="muted small">[${disc} off]</span>`;

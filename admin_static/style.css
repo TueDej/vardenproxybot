@@ -622,3 +622,25 @@ code {
   border-color: var(--accent);
   outline: none;
 }
+
+.drag-handle {
+  cursor: grab;
+  user-select: none;
+  text-align: center;
+  color: var(--muted);
+  font-size: 16px;
+  width: 32px;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+tr.dragging {
+  opacity: 0.4;
+}
+
+tr.drag-over {
+  outline: 1px dashed var(--accent);
+  background: var(--card-hover) !important;
+}
