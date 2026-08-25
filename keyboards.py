@@ -1,6 +1,6 @@
 from telegram import ReplyKeyboardMarkup
 
-from packages import PACKAGES
+import packages as _pkg_mod
 
 MAIN_MENU = [
     ["🛒 خرید اشتراک"],
@@ -13,7 +13,11 @@ _HOME_ROW = list(HOME_BUTTON)
 
 
 def _package_buttons():
-    rows = [[f"{p['label']} - {p['price']:,} تومان"] for p in PACKAGES]
+    try:
+        pkgs, _, _ = _pkg_mod.load_packages()
+    except Exception:
+        pkgs = _pkg_mod.PACKAGES
+    rows = [[f"{p['label']} - {p['price']:,} تومان"] for p in pkgs]
     rows.append(_HOME_ROW.copy())
     return rows
 

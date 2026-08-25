@@ -324,6 +324,70 @@ async def handle_admin_users(request: web.Request) -> web.Response:
         return web.json_response({"total": total, "page": page, "limit": limit, "items": items})
 
 
+async def handle_admin_packages_get(request: web.Request) -> web.Response:
+    import packages as pkg
+
+    packages, base, paused = pkg.load_packages()
+    return web.json_response(
+        {"base_price_per_gb": base, "packages": packages, "payments_paused": paused}
+    )
+
+
+async def handle_admin_packages_save(request: web.Request) -> web.Response:
+    import packages as pkg
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+
+    base = data.get("base_price_per_gb")
+    packages_in = data.get("packages")
+    paused = data.get("payments_paused")
+
+    # Validate base
+    if base is not None:
+        try:
+            base = int(base)
+        except (ValueError, TypeError):
+            return web.json_response({"error": "base_price_per_gb must be integer"}, status=400)
+        if not (1000 <= base <= 100000):
+            return web.json_response(
+                {"error": "base_price_per_gb out of range 1000..100000"}, status=400
+            )
+
+    # Validate packages if provided
+    if packages_in is not None:
+        if not isinstance(packages_in, list) or not packages_in:
+            return web.json_response({"error": "packages must be non-empty list"}, status=400)
+        for p in packages_in:
+            if not isinstance(p, dict):
+                return web.json_response({"error": "each package must be object"}, status=400)
+            if not str(p.get("label", "")).strip():
+                return web.json_response({"error": "label required"}, status=400)
+            try:
+                gb = int(p.get("data_gb", 0))
+            except (ValueError, TypeError):
+                return web.json_response({"error": "data_gb must be int"}, status=400)
+            if gb < 0 or gb > 10000:
+                return web.json_response({"error": "data_gb out of range"}, status=400)
+            # Unlimited must have price
+            if gb == 0:
+                try:
+                    price = int(p.get("price", 0))
+                except (ValueError, TypeError):
+                    return web.json_response({"error": "Unlimited price must be int"}, status=400)
+                if not (1000 <= price <= 10_000_000):
+                    return web.json_response({"error": "Unlimited price out of range"}, status=400)
+
+    saved_pkgs, saved_base, saved_paused = pkg.save_packages(
+        packages=packages_in, base_price_per_gb=base, payments_paused=paused
+    )
+    return web.json_response(
+        {"base_price_per_gb": saved_base, "packages": saved_pkgs, "payments_paused": saved_paused}
+    )
+
+
 # ── Admin static ────────────────────────────────────────────────────
 
 
@@ -543,6 +607,8 @@ def build_app(application) -> web.Application:
     app.router.add_get(ADMIN_PREFIX + "/api/stats", handle_admin_stats)
     app.router.add_get(ADMIN_PREFIX + "/api/orders", handle_admin_orders)
     app.router.add_get(ADMIN_PREFIX + "/api/users", handle_admin_users)
+    app.router.add_get(ADMIN_PREFIX + "/api/packages", handle_admin_packages_get)
+    app.router.add_post(ADMIN_PREFIX + "/api/packages", handle_admin_packages_save)
     # Static files for admin UI
     static_dir = _admin_static_dir()
     if static_dir.exists():

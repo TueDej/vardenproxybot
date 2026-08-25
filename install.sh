@@ -325,6 +325,15 @@ deploy_source() {
         info "Backed up ${#DB_FILES[@]} database file(s)."
     fi
 
+    # Preserve admin_settings.json (package config) if exists
+    ADMIN_SETTINGS_SRC="$INSTALL_DIR/admin_settings.json"
+    ADMIN_SETTINGS_TMP=""
+    if [[ -f "$ADMIN_SETTINGS_SRC" && "$WIPE_DB" != "true" ]]; then
+        ADMIN_SETTINGS_TMP="$(mktemp /tmp/varden_admin_settings.XXXXXX.json)"
+        cp "$ADMIN_SETTINGS_SRC" "$ADMIN_SETTINGS_TMP" 2>/dev/null || true
+        chmod 600 "$ADMIN_SETTINGS_TMP" 2>/dev/null || true
+    fi
+
     mkdir -p "$INSTALL_DIR"
     chmod 750 "$INSTALL_DIR" 2>/dev/null || true
     # Copy source with excludes (avoids dragging venv/.git/db files through cp)
@@ -333,6 +342,7 @@ deploy_source() {
         --exclude='./.env' --exclude='./.env.example' \
         --exclude='__pycache__' --exclude='*.pyc' \
         --exclude='*.db' --exclude='*.sqlite3' --exclude='*.sqlite' \
+        --exclude='admin_settings.json' \
         --exclude='./install.sh' \
         -cf - . | tar -C "$INSTALL_DIR" -xf -
     rm -rf "$INSTALL_DIR/handlers/__pycache__" 2>/dev/null || true
@@ -344,6 +354,14 @@ deploy_source() {
         done
         rm -rf "$BACKUP_DIR"
         info "Restored database file(s)."
+    fi
+
+    # Restore admin_settings.json
+    if [[ -n "$ADMIN_SETTINGS_TMP" && -f "$ADMIN_SETTINGS_TMP" ]]; then
+        cp "$ADMIN_SETTINGS_TMP" "$INSTALL_DIR/admin_settings.json" 2>/dev/null || true
+        chmod 600 "$INSTALL_DIR/admin_settings.json" 2>/dev/null || true
+        rm -f "$ADMIN_SETTINGS_TMP"
+        info "Restored admin_settings.json"
     fi
 
     chown -R "$CURRENT_USER:$CURRENT_GROUP" "$INSTALL_DIR"

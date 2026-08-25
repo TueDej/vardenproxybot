@@ -23,7 +23,7 @@ def _expiry_dt(ms: int) -> datetime | None:
 
 
 def _data_label(total_gb: int) -> str:
-    return "نامحدود" if total_gb == 0 else f"{total_gb // (1024**3)} گیگابایت"
+    return "Unlimited" if total_gb == 0 else f"{total_gb // (1024 ** 3)}GB"
 
 
 def _format_links_block(links: list[str]) -> str:

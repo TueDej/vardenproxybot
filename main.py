@@ -91,11 +91,10 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Buy flow — only known package labels (prevents arbitrary "تومان" texts from creating orders)
     elif text.endswith("تومان"):
-        # Defer validation to package_selected (checks PACKAGE_MAP) but we guard here
-        # to avoid spamming DB on arbitrary messages; package_selected will reply with error.
-        from handlers.buy import PACKAGE_MAP as _PM
+        from handlers.buy import _get_package_map as _gpm
 
-        if text in _PM:
+        pm = _gpm()
+        if text in pm:
             await package_selected(update, context)
         else:
             await update.effective_message.reply_text(

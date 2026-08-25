@@ -7,90 +7,140 @@
 <link rel="stylesheet" href="/admin/static/style.css">
 </head>
 <body>
-<div class="container">
-  <header class="header">
-    <h1>Varden<span>Admin</span></h1>
-    <div class="header-actions">
-      <span id="auth-status" class="muted">protected • BasicAuth</span>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-logo">⬢</div>
+      <div>
+        <div class="brand-title">Varden<span>Admin</span></div>
+        <div class="brand-sub muted">Void • green</div>
+      </div>
     </div>
-  </header>
-
-  <section id="stats" class="stats-grid">
-    <div class="card"><div class="card-label">Total Orders</div><div class="card-value" id="stat-total">—</div></div>
-    <div class="card"><div class="card-label">Pending</div><div class="card-value amber" id="stat-pending">—</div></div>
-    <div class="card"><div class="card-label">Approved</div><div class="card-value emerald" id="stat-approved">—</div></div>
-    <div class="card"><div class="card-label">Revenue</div><div class="card-value" id="stat-revenue">—</div></div>
-    <div class="card"><div class="card-label">Users</div><div class="card-value" id="stat-users">—</div></div>
-    <div class="card"><div class="card-label">Today</div><div class="card-value" id="stat-today">—</div></div>
-  </section>
-
-  <section class="toolbar">
-    <div class="search-wrap">
-      <input id="q" type="search" placeholder="Search everything: ref, authority, email, telegram id, username…" autocomplete="off">
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-tab="orders">Orders</button>
+      <button class="nav-item" data-tab="users">Users</button>
+      <button class="nav-item" data-tab="packages">Packages</button>
+    </nav>
+    <div class="sidebar-footer muted">
+      <div>protected • BasicAuth</div>
+      <div id="sidebar-stats" class="muted small"></div>
     </div>
-    <select id="status">
-      <option value="">All status</option>
-      <option value="pending">pending</option>
-      <option value="approved">approved</option>
-      <option value="cancelled">cancelled</option>
-      <option value="rejected">rejected</option>
-    </select>
-    <select id="package">
-      <option value="">All packages</option>
-    </select>
-    <input id="from" type="date" title="From">
-    <input id="to" type="date" title="To">
-    <button id="apply" class="btn primary">Filter</button>
-    <button id="clear" class="btn">Clear</button>
-  </section>
+  </aside>
 
-  <nav class="tabs">
-    <button class="tab active" data-tab="orders">Orders</button>
-    <button class="tab" data-tab="users">Users</button>
-  </nav>
+  <main class="main">
+    <header class="header">
+      <h1 id="page-title">Orders</h1>
+      <span id="auth-status" class="muted">read-only • Void dark</span>
+    </header>
 
-  <section id="orders-panel" class="panel">
-    <div class="table-wrap">
-      <table id="orders-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>User</th>
-            <th>Package</th>
-            <th>Amount</th>
-            <th>Status</th>
-            <th>Ref ID</th>
-            <th>Authority</th>
-            <th>Panel Email</th>
-            <th>Created</th>
-          </tr>
-        </thead>
-        <tbody id="orders-body"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
-      </table>
-    </div>
-    <div class="pagination" id="orders-pag"></div>
-  </section>
+    <section id="stats" class="stats-grid">
+      <div class="card"><div class="card-label">Total Orders</div><div class="card-value" id="stat-total">—</div></div>
+      <div class="card"><div class="card-label">Pending</div><div class="card-value amber" id="stat-pending">—</div></div>
+      <div class="card"><div class="card-label">Approved</div><div class="card-value emerald" id="stat-approved">—</div></div>
+      <div class="card"><div class="card-label">Revenue</div><div class="card-value" id="stat-revenue">—</div></div>
+      <div class="card"><div class="card-label">Users</div><div class="card-value" id="stat-users">—</div></div>
+      <div class="card"><div class="card-label">Today</div><div class="card-value" id="stat-today">—</div></div>
+    </section>
 
-  <section id="users-panel" class="panel hidden">
-    <div class="table-wrap">
-      <table id="users-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Telegram ID</th>
-            <th>Username</th>
-            <th>Name</th>
-            <th>Orders</th>
-            <th>Joined</th>
-          </tr>
-        </thead>
-        <tbody id="users-body"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
-      </table>
-    </div>
-    <div class="pagination" id="users-pag"></div>
-  </section>
+    <section class="toolbar" id="toolbar-orders">
+      <div class="search-wrap">
+        <input id="q" type="search" placeholder="Search everything: ref, authority, email, telegram id, username…" autocomplete="off">
+      </div>
+      <select id="status">
+        <option value="">All status</option>
+        <option value="pending">pending</option>
+        <option value="approved">approved</option>
+        <option value="cancelled">cancelled</option>
+        <option value="rejected">rejected</option>
+      </select>
+      <select id="package">
+        <option value="">All packages</option>
+      </select>
+      <input id="from" type="date" title="From">
+      <input id="to" type="date" title="To">
+      <button id="apply" class="btn primary">Filter</button>
+      <button id="clear" class="btn">Clear</button>
+    </section>
 
-  <footer class="footer muted">VardenProxy • Admin panel • Read-only • Search indexes status/authority/ref</footer>
+    <section id="orders-panel" class="panel">
+      <div class="table-wrap">
+        <table id="orders-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>User</th>
+              <th>Package</th>
+              <th>Amount</th>
+              <th>Status</th>
+              <th>Ref ID</th>
+              <th>Authority</th>
+              <th>Panel Email</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="orders-body"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="orders-pag"></div>
+    </section>
+
+    <section id="users-panel" class="panel hidden">
+      <div class="table-wrap">
+        <table id="users-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Telegram ID</th>
+              <th>Username</th>
+              <th>Name</th>
+              <th>Orders</th>
+              <th>Joined</th>
+            </tr>
+          </thead>
+          <tbody id="users-body"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="users-pag"></div>
+    </section>
+
+    <section id="packages-panel" class="panel hidden">
+      <div class="packages-header">
+        <div class="packages-controls">
+          <label>Base price per GB (toman)
+            <input id="base-price" type="number" min="1000" max="100000" step="100" placeholder="4500">
+          </label>
+          <label class="switch">
+            <input id="payments-paused" type="checkbox">
+            <span>Block new payments (maintenance)</span>
+          </label>
+        </div>
+        <div class="muted small">Discount: 0% at 10GB → ~28% at 100GB (diminishing) + .999 trick. Unlimited is manual price.</div>
+      </div>
+      <div class="table-wrap">
+        <table id="packages-table">
+          <thead>
+            <tr>
+              <th>Label</th>
+              <th>Data GB (0=Unlimited)</th>
+              <th>Discount</th>
+              <th>Price (toman)</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="packages-body"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="packages-actions">
+        <button id="pkg-add" class="btn">+ Add package</button>
+        <div class="spacer"></div>
+        <button id="pkg-discard" class="btn">Discard changes</button>
+        <button id="pkg-save" class="btn primary">Save</button>
+      </div>
+      <div id="pkg-msg" class="muted small" style="margin-top:8px"></div>
+    </section>
+
+    <footer class="footer muted">VardenProxy • Admin panel • Read-only • Search indexes status/authority/ref</footer>
+  </main>
 </div>
 <script src="/admin/static/app.js"></script>
 </body>

@@ -16,14 +16,30 @@ from keyboards import (
     packages_keyboard,
 )
 from models import Order, User
-from packages import DURATION_DAYS, PACKAGES
+from packages import DURATION_DAYS
 from vpn_service import VPNPanelError, VPNPanelService
 from zarinpal import ZarinpalError, request_payment, verify_payment
 
 log = logging.getLogger(__name__)
 
-# Lookup map for text-based package selection
-PACKAGE_MAP = {f"{p['label']} - {p['price']:,} تومان": p for p in PACKAGES}
+
+# Lookup map for text-based package selection — refreshed dynamically via packages.load_packages()
+def _build_package_map() -> dict[str, dict]:
+    import packages as _pkg
+
+    pkgs, _, _ = _pkg.load_packages()
+    return {f"{p['label']} - {p['price']:,} تومان": p for p in pkgs}
+
+
+PACKAGE_MAP = _build_package_map()
+
+
+def _get_package_map() -> dict[str, dict]:
+    # Live reload so admin panel changes apply without restart
+    try:
+        return _build_package_map()
+    except Exception:
+        return PACKAGE_MAP
 
 
 class OrderAlreadyApproved(Exception):
@@ -41,6 +57,15 @@ class OrderNotApprovable(Exception):
 
 def purchase_blocked_reason(telegram_id: int) -> str | None:
     """Return a user-facing reason string if this user may not buy right now."""
+    # Check maintenance mode (admin toggled via panel) — file-backed, live reload
+    try:
+        import packages as _pkg
+
+        _, _, _paused = _pkg.load_packages()
+        if _paused:
+            return "⏸ سرویس در حال به‌روزرسانی است — لطفاً چند دقیقه بعد دوباره تلاش کنید."
+    except Exception:
+        pass
     if not config.zarinpal_configured:
         return "💳 پرداخت‌ها موقتاً در دسترس نیستند.\nلطفاً بعداً تلاش کنید یا با پشتیبانی تماس بگیرید."
     if config.zarinpal_sandbox and telegram_id not in config.admin_ids:
@@ -89,8 +114,8 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    pkg = PACKAGE_MAP.get(text)
+    text = (update.message.text or "").strip()
+    pkg = _get_package_map().get(text)
     if not pkg:
         await update.message.reply_text("❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید.")
         return

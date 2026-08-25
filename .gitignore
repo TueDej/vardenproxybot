@@ -8,6 +8,7 @@ env/
 .venv/
 *.db
 *.sqlite3
+admin_settings.json
 .idea/
 .vscode/
 *.log
