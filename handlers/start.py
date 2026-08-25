@@ -16,7 +16,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ℹ️ <b>راهنما و پشتیبانی</b> — پاسخ پرسش‌های متداول و ارتباط با ما.\n\n"
         "برای شروع، یکی از گزینه‌های زیر را انتخاب کنید:"
     )
-    await update.message.reply_text(welcome_text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+    await update.message.reply_text(
+        welcome_text, reply_markup=main_menu_keyboard(), parse_mode="HTML"
+    )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

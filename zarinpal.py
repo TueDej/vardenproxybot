@@ -4,6 +4,7 @@ Authentication uses the merchant/terminal UUID supplied via
 ZARINPAL_ACCESS_TOKEN. All requests use a direct connection — gateway
 traffic must never traverse the SOCKS proxy used for Telegram.
 """
+
 import asyncio
 import logging
 from typing import Any
@@ -48,7 +49,9 @@ def _error_detail(data: Any, status_code: int, path: str) -> str:
         inner = data["data"]
         code = inner.get("code")
         if code not in (None, VERIFIED_NEW, VERIFIED_ALREADY):
-            msgs.append(f"code {code}: {inner.get('message')}" if inner.get("message") else f"code {code}")
+            msgs.append(
+                f"code {code}: {inner.get('message')}" if inner.get("message") else f"code {code}"
+            )
     return "; ".join(msgs) or f"HTTP {status_code}"
 
 
@@ -78,7 +81,9 @@ async def _post(path: str, payload: dict, retries: int = 3) -> dict:
             data = resp.json()
         except ValueError as exc:
             snippet = " ".join((resp.text or "").split())[:160]
-            raise ZarinpalError(f"Non-JSON response (HTTP {resp.status_code}) [{path}]: {snippet}") from exc
+            raise ZarinpalError(
+                f"Non-JSON response (HTTP {resp.status_code}) [{path}]: {snippet}"
+            ) from exc
 
         if not isinstance(data, dict):
             raise ZarinpalError(f"Unexpected response shape [{path}] (HTTP {resp.status_code})")

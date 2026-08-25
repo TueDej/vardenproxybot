@@ -2,7 +2,7 @@ import asyncio
 import logging
 import secrets
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
@@ -26,7 +26,7 @@ class VPNPanelError(Exception):
 
 
 def build_expiry_ms(duration_days: int) -> int:
-    expires = datetime.now(timezone.utc) + timedelta(days=duration_days)
+    expires = datetime.now(UTC) + timedelta(days=duration_days)
     return int(expires.timestamp() * 1000)
 
 
@@ -221,7 +221,9 @@ class VPNPanelService:
         try:
             for _ in range(5):
                 try:
-                    links = normalize_links(await cls._request("GET", f"{CLIENTS_API}/links/{email}"))
+                    links = normalize_links(
+                        await cls._request("GET", f"{CLIENTS_API}/links/{email}")
+                    )
                 except VPNPanelError:
                     await asyncio.sleep(0.4)
                     continue
@@ -378,8 +380,10 @@ async def _selfcheck() -> None:
     port = inbound.get("port") if isinstance(inbound, dict) else None
     protocol = inbound.get("protocol") if isinstance(inbound, dict) else None
     clients = (inbound or {}).get("settings", {}).get("clients", [])
-    print(f"OK   auth + inbound: remark={remark!r} protocol={protocol} "
-          f"port={port} clients={len(clients)}")
+    print(
+        f"OK   auth + inbound: remark={remark!r} protocol={protocol} "
+        f"port={port} clients={len(clients)}"
+    )
 
     # Step 2: does the modern v3 client API exist on this panel?
     try:

@@ -129,16 +129,14 @@ def main():
         log.error("BOT_TOKEN is not set in .env")
         return
 
-    # Prevent multiple instances using a file lock
+    # Prevent multiple instances using a file lock (must stay open to hold lock)
     lock_file = open("/tmp/vardenproxybot.lock", "w")
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (IOError, OSError):
+    except OSError:
         log.error("Another instance is already running. Exiting.")
-        try:
+        with __import__("contextlib").suppress(Exception):
             lock_file.close()
-        except Exception:
-            pass
         return
 
     request = _build_request()
@@ -178,9 +176,13 @@ def main():
             config.zarinpal_callback_url,
         )
     elif config.zarinpal_access_token:
-        log.warning("Payments: mock/manual mode — ZARINPAL_ACCESS_TOKEN is set but ZARINPAL_CALLBACK_URL is missing")
+        log.warning(
+            "Payments: mock/manual mode — ZARINPAL_ACCESS_TOKEN is set but ZARINPAL_CALLBACK_URL is missing"
+        )
     elif config.zarinpal_callback_url:
-        log.warning("Payments: mock/manual mode — ZARINPAL_CALLBACK_URL is set but ZARINPAL_ACCESS_TOKEN is missing")
+        log.warning(
+            "Payments: mock/manual mode — ZARINPAL_CALLBACK_URL is set but ZARINPAL_ACCESS_TOKEN is missing"
+        )
     else:
         log.info("Payments: mock/manual mode (no ZARINPAL_* configured)")
     if not VPNPanelService.is_configured():

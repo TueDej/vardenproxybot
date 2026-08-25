@@ -55,10 +55,18 @@ def _migrate_sync(sync_conn) -> None:
             except Exception:
                 log.warning("Migration amount_usd->amount_toomans failed", exc_info=True)
         if "panel_email" not in cols:
-            _add_col("ALTER TABLE orders ADD COLUMN panel_email VARCHAR(128)", "Added orders.panel_email")
+            _add_col(
+                "ALTER TABLE orders ADD COLUMN panel_email VARCHAR(128)", "Added orders.panel_email"
+            )
         if "sub_id" not in cols:
             _add_col("ALTER TABLE orders ADD COLUMN sub_id VARCHAR(64)", "Added orders.sub_id")
         if "payment_authority" not in cols:
-            _add_col("ALTER TABLE orders ADD COLUMN payment_authority VARCHAR(64)", "Added orders.payment_authority")
+            _add_col(
+                "ALTER TABLE orders ADD COLUMN payment_authority VARCHAR(64)",
+                "Added orders.payment_authority",
+            )
         if "payment_ref_id" not in cols:
-            _add_col("ALTER TABLE orders ADD COLUMN payment_ref_id VARCHAR(32)", "Added orders.payment_ref_id")
+            _add_col(
+                "ALTER TABLE orders ADD COLUMN payment_ref_id VARCHAR(32)",
+                "Added orders.payment_ref_id",
+            )

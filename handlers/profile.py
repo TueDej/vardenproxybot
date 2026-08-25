@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from html import escape
 
 from sqlalchemy import select
@@ -19,7 +19,7 @@ def _expiry_dt(ms: int) -> datetime | None:
     """Panel expiry in ms since epoch; 0 means 'never expires'."""
     if not ms:
         return None
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+    return datetime.fromtimestamp(ms / 1000, tz=UTC)
 
 
 def _data_label(total_gb: int) -> str:
@@ -35,7 +35,9 @@ def _format_links_block(links: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _format_product_message(c: dict, expiry_dt: datetime | None, online_emails: set, now: datetime) -> str:
+def _format_product_message(
+    c: dict, expiry_dt: datetime | None, online_emails: set, now: datetime
+) -> str:
     if expiry_dt is None:
         expiry_line = "⏳ انقضا: ندارد"
     else:
@@ -85,7 +87,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=home_keyboard(), parse_mode="HTML")
         return
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     online_emails = await VPNPanelService.get_online_emails() if clients else set()
 
     # Split subscriptions by state so expired ones stay visible.
@@ -105,9 +107,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if disabled:
         summary += f"\n🚫 غیرفعال: {len(disabled)}"
 
-    await update.message.reply_text(
-        text + summary, reply_markup=home_keyboard(), parse_mode="HTML"
-    )
+    await update.message.reply_text(text + summary, reply_markup=home_keyboard(), parse_mode="HTML")
 
     # Paginate to avoid flood: max 10 detailed messages, rest truncated
     max_details = 10

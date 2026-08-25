@@ -57,11 +57,15 @@ class Config:
         self.bot_token = os.getenv("BOT_TOKEN", "")
         admin_ids_str = os.getenv("ADMIN_IDS", "")
         if admin_ids_str:
-            self.admin_ids = [int(x.strip()) for x in admin_ids_str.split(",") if x.strip().isdigit()]
+            self.admin_ids = [
+                int(x.strip()) for x in admin_ids_str.split(",") if x.strip().isdigit()
+            ]
         self.database_url = os.getenv("DATABASE_URL", self.database_url)
 
         # Proxy settings
-        self.proxy_disabled = os.getenv("PROXY_DISABLED", str(self.proxy_disabled)).strip().lower() in (
+        self.proxy_disabled = os.getenv(
+            "PROXY_DISABLED", str(self.proxy_disabled)
+        ).strip().lower() in (
             "true",
             "1",
             "yes",

@@ -88,7 +88,9 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except TelegramError as exc:
             log.warning(
                 "Could not notify user %s about approval of order #%s: %s",
-                order.user.telegram_id, order_id, exc,
+                order.user.telegram_id,
+                order_id,
+                exc,
             )
 
 

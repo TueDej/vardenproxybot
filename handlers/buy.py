@@ -13,7 +13,6 @@ from database import async_session
 from keyboards import (
     cancel_keyboard,
     home_keyboard,
-    main_menu_keyboard,
     packages_keyboard,
 )
 from models import Order, User
@@ -24,9 +23,7 @@ from zarinpal import ZarinpalError, request_payment, verify_payment
 log = logging.getLogger(__name__)
 
 # Lookup map for text-based package selection
-PACKAGE_MAP = {
-    f"{p['label']} - {p['price']:,} تومان": p for p in PACKAGES
-}
+PACKAGE_MAP = {f"{p['label']} - {p['price']:,} تومان": p for p in PACKAGES}
 
 
 class OrderAlreadyApproved(Exception):
@@ -45,10 +42,7 @@ class OrderNotApprovable(Exception):
 def purchase_blocked_reason(telegram_id: int) -> str | None:
     """Return a user-facing reason string if this user may not buy right now."""
     if not config.zarinpal_configured:
-        return (
-            "💳 پرداخت‌ها موقتاً در دسترس نیستند.\n"
-            "لطفاً بعداً تلاش کنید یا با پشتیبانی تماس بگیرید."
-        )
+        return "💳 پرداخت‌ها موقتاً در دسترس نیستند.\nلطفاً بعداً تلاش کنید یا با پشتیبانی تماس بگیرید."
     if config.zarinpal_sandbox and telegram_id not in config.admin_ids:
         return "🔒 <b>حالت آزمایشی</b> — فعلاً فقط مدیر فروشگاه امکان خرید دارد."
     return None
@@ -143,17 +137,14 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("order_id", None)
         # Do not leak gateway internals to the user; log detailed error server-side.
         await update.message.reply_text(
-            "❌ <b>خطا در ایجاد پرداخت</b>\n"
-            "لطفاً چند دقیقه بعد دوباره تلاش کنید.",
+            "❌ <b>خطا در ایجاد پرداخت</b>\nلطفاً چند دقیقه بعد دوباره تلاش کنید.",
             parse_mode="HTML",
         )
         return
 
     async with async_session() as session:
         await session.execute(
-            sa_update(Order)
-            .where(Order.id == order.id)
-            .values(payment_authority=pay["authority"])
+            sa_update(Order).where(Order.id == order.id).values(payment_authority=pay["authority"])
         )
         await session.commit()
 
@@ -267,9 +258,9 @@ async def approve_order(session, order: Order) -> dict:
         .values(status="approved")
     )
     if claim.rowcount == 0:
-        current = (await session.execute(
-            select(Order.status).where(Order.id == order_id)
-        )).scalar_one_or_none()
+        current = (
+            await session.execute(select(Order.status).where(Order.id == order_id))
+        ).scalar_one_or_none()
         if current == "approved":
             raise OrderAlreadyApproved(order_id)
         raise OrderNotApprovable(order_id, current)
@@ -286,15 +277,17 @@ async def approve_order(session, order: Order) -> dict:
         links = []
         if email:
             # Partial provisioning happened before — try to reuse the client.
-            links = await VPNPanelService.get_client_links(email) or \
-                await VPNPanelService.get_subscription_links(sub_id)
+            links = await VPNPanelService.get_client_links(
+                email
+            ) or await VPNPanelService.get_subscription_links(sub_id)
             if links:
                 log.info("Order #%s: reusing existing panel client %s", order_id, email)
             else:
                 # Client vanished from the panel — drop the stale reference.
                 log.warning(
                     "Order #%s: panel client %s has no links; provisioning fresh.",
-                    order_id, email,
+                    order_id,
+                    email,
                 )
                 await _set(panel_email=None, sub_id=None)
                 order.panel_email = None
@@ -333,7 +326,9 @@ async def approve_order(session, order: Order) -> dict:
             await session.commit()
         except Exception:
             log.error("Failed to revert approved claim for order #%s", order_id, exc_info=True)
-        raise VPNPanelError(f"Provisioning failed for order #{order_id}: unexpected error")
+        raise VPNPanelError(
+            f"Provisioning failed for order #{order_id}: unexpected error"
+        ) from None
 
     return {"email": email, "sub_id": sub_id, "links": links}
 

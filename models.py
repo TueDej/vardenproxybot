@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -16,7 +16,7 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     first_name: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
 
     orders: Mapped[list["Order"]] = relationship(
@@ -30,7 +30,9 @@ class User(Base):
 class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
-        CheckConstraint("status IN ('pending','approved','rejected','cancelled')", name="ck_orders_status"),
+        CheckConstraint(
+            "status IN ('pending','approved','rejected','cancelled')", name="ck_orders_status"
+        ),
         CheckConstraint("duration_days >= 0", name="ck_orders_duration"),
         CheckConstraint("data_gb >= 0", name="ck_orders_data_gb"),
         CheckConstraint("amount_toomans >= 0", name="ck_orders_amount"),
@@ -57,7 +59,7 @@ class Order(Base):
     payment_authority: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payment_ref_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
 
     user: Mapped[User] = relationship(back_populates="orders", lazy="raise")

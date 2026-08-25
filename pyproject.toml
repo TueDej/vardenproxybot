@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+skip-string-normalization = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["."]
+exclude = ["venv", ".venv", "__pycache__", ".git", "admin_static"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4", "UP", "SIM", "RUF"]
+ignore = [
+    "E501",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "SIM115",  # file lock must stay open to hold flock
+    "SIM108",  # readability over ternary for IPv6 parsing
+]
+
+[tool.ruff.lint.isort]
+known-first-party = []
+
+[tool.mypy]
+python_version = "3.11"
+# Strict enabled incrementally — allow untyped defs for now to avoid 100+ errors on existing code
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+exclude = "venv|admin_static"
+
+[[tool.mypy.overrides]]
+module = "telegram.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "sqlalchemy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "httpx.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "aiohttp.*"
+ignore_missing_imports = true
