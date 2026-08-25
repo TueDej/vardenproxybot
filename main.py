@@ -79,7 +79,9 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await help_command(update, context)
 
     # Navigation
-    elif text == "🔙 Main Menu":
+    elif text == "🏠 Home":
+        await start(update, context)
+    elif text == "🔙 Main Menu":  # legacy button still on some clients' screens
         await start(update, context)
 
     # Buy flow

@@ -8,18 +8,13 @@ MAIN_MENU = [
     ["ℹ️ Help / Support"],
 ]
 
-PAYMENT = [
-    ["✅ I have paid"],
-    ["❌ Cancel"],
-]
-
-BACK = [
-    ["🔙 Main Menu"],
-]
+HOME_BUTTON = ["🏠 Home"]
 
 
 def _package_buttons():
-    return [[f"{p['label']} - {p['price']:,} Toomans"] for p in PACKAGES]
+    rows = [[f"{p['label']} - {p['price']:,} Toomans"] for p in PACKAGES]
+    rows.append(HOME_BUTTON)
+    return rows
 
 
 def main_menu_keyboard():
@@ -31,8 +26,15 @@ def packages_keyboard():
 
 
 def payment_keyboard():
-    return ReplyKeyboardMarkup(PAYMENT, resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        [
+            ["✅ I have paid"],
+            ["❌ Cancel"],
+            HOME_BUTTON,
+        ],
+        resize_keyboard=True,
+    )
 
 
-def back_keyboard():
-    return ReplyKeyboardMarkup(BACK, resize_keyboard=True)
+def home_keyboard():
+    return ReplyKeyboardMarkup([HOME_BUTTON], resize_keyboard=True)

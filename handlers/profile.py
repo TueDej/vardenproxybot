@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
-from keyboards import back_keyboard, main_menu_keyboard
+from keyboards import home_keyboard, main_menu_keyboard
 from models import User
 from vpn_service import VPNPanelError, VPNPanelService
 
@@ -75,14 +75,14 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not config.panel_configured:
         text += "<i>Panel not configured.</i>"
-        await update.message.reply_text(text, reply_markup=back_keyboard(), parse_mode="HTML")
+        await update.message.reply_text(text, reply_markup=home_keyboard(), parse_mode="HTML")
         return
 
     try:
         clients = await VPNPanelService.get_clients_by_telegram_id(telegram_id)
     except VPNPanelError as exc:
         text += f"<i>Panel error: {escape(str(exc))}</i>"
-        await update.message.reply_text(text, reply_markup=back_keyboard(), parse_mode="HTML")
+        await update.message.reply_text(text, reply_markup=home_keyboard(), parse_mode="HTML")
         return
 
     now = datetime.now(timezone.utc)
@@ -106,7 +106,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         summary += f"\n🚫 Disabled: {len(disabled)}"
 
     await update.message.reply_text(
-        text + summary, reply_markup=back_keyboard(), parse_mode="HTML"
+        text + summary, reply_markup=home_keyboard(), parse_mode="HTML"
     )
 
     for c, expiry_dt in active:
