@@ -3,7 +3,7 @@ import logging
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -13,7 +13,12 @@ log = logging.getLogger(__name__)
 
 CLIENTS_API = "/panel/api/clients"
 INBOUNDS_API = "/panel/api/inbounds"
-SETTINGS_API = "/panel/api/setting"
+
+# Entry point published to users (the reverse proxy in front of the panel).
+PUBLIC_ENTRY_PORT = 443
+
+# Preferred ordering of preserved transport parameters in rewritten URIs.
+_TRANSPORT_KEY_ORDER = ("type", "host", "path", "serviceName", "mode", "headerType", "flow")
 
 
 class VPNPanelError(Exception):
@@ -25,8 +30,44 @@ def build_expiry_ms(duration_days: int) -> int:
     return int(expires.timestamp() * 1000)
 
 
+def rewrite_vless_link(link: str) -> str:
+    """Rewrite a panel vless URI so clients enter through the public reverse proxy.
+
+    The panel emits links pointing at its raw backend port with security=none.
+    Clients must instead connect on the standard TLS entry: port is forced to
+    PUBLIC_ENTRY_PORT, TLS/SNI/fingerprint/ALPN are enforced, and transport
+    settings (type/host/path/...) are preserved.
+    Non-vless or malformed URIs are returned unchanged.
+    """
+    try:
+        parts = urlsplit(link)
+    except ValueError:
+        return link
+    if parts.scheme != "vless" or not parts.hostname or not parts.username:
+        return link
+
+    params = dict(parse_qsl(parts.query, keep_blank_values=True))
+    rewritten = {
+        "encryption": params.pop("encryption", "none"),
+        "security": "tls",
+        "sni": parts.hostname,
+        "fp": "chrome",
+        "alpn": "h2",
+        "insecure": "0",
+        "allowInsecure": "0",
+    }
+    for key in _TRANSPORT_KEY_ORDER:
+        if key in params:
+            rewritten[key] = params.pop(key)
+    for key, value in params.items():  # any unexpected extras keep their order
+        rewritten.setdefault(key, value)
+
+    netloc = f"{parts.username}@{parts.hostname}:{PUBLIC_ENTRY_PORT}"
+    return urlunsplit((parts.scheme, netloc, parts.path, urlencode(rewritten), parts.fragment))
+
+
 def normalize_links(obj) -> list[str]:
-    """Normalize the /links/{email} response payload to a list of URI strings."""
+    """Normalize the /links/{email} response payload to user-facing URI strings."""
     if obj is None:
         return []
     if isinstance(obj, list):
@@ -43,66 +84,18 @@ def normalize_links(obj) -> list[str]:
     links = []
     for item in items:
         if isinstance(item, str) and "://" in item:
-            links.append(item)
+            links.append(rewrite_vless_link(item))
         elif isinstance(item, dict) and isinstance(item.get("url"), str):
-            links.append(item["url"])
+            links.append(rewrite_vless_link(item["url"]))
     return links
 
 
 class VPNPanelService:
     """Async client for the 3x-ui v3.x REST API (Bearer token auth)."""
 
-    _settings_cache: dict | None = None
-
     @staticmethod
     def is_configured() -> bool:
         return config.panel_configured
-
-    @classmethod
-    async def all_settings(cls) -> dict:
-        """Fetch (and cache) the panel's AllSetting object."""
-        if cls._settings_cache is not None:
-            return cls._settings_cache
-        try:
-            obj = await cls._request("POST", f"{SETTINGS_API}/all", retries=1)
-        except Exception:
-            obj = {}
-        if isinstance(obj, dict) and obj:
-            cls._settings_cache = obj
-        else:
-            cls._settings_cache = {}
-        return cls._settings_cache
-
-    @classmethod
-    async def subscription_url(cls, sub_id: str | None) -> str:
-        """Build the public subscription URL exactly like the panel UI does.
-
-        Source of truth is the panel's own settings (fetched live):
-          - subURI overrides everything when set (explicit base incl. custom path)
-          - otherwise scheme://(subDomain | panel host):subPort + subPath
-        Falls back to deriving from PANEL_URL if settings are unavailable.
-        """
-        if not sub_id:
-            return ""
-        settings = await cls.all_settings()
-        if settings:
-            if uri := settings.get("subURI"):
-                return f"{str(uri).rstrip('/')}/{sub_id}"
-            scheme = "https" if settings.get("subTLS") else "http"
-            host = settings.get("subDomain") or urlparse(config.panel_url).hostname or ""
-            port = settings.get("subPort")
-            netloc = f"{host}:{port}" if port else host
-            if netloc:
-                path = settings.get("subPath") or "/sub/"
-                return f"{scheme}://{netloc}{path}{sub_id}"
-        # Fallback: derive from PANEL_URL
-        parsed = urlparse(config.panel_url)
-        host = parsed.hostname or ""
-        if not host:
-            return ""
-        port = parsed.port
-        netloc = f"{host}:{port}" if port else host
-        return f"{parsed.scheme}://{netloc}/sub/{sub_id}"
 
     @classmethod
     async def _request(
@@ -214,7 +207,7 @@ class VPNPanelService:
         """Return all panel clients for a user, fetched via /clients/list.
 
         Each dict has: email, sub_id, enable, expiry_time, total_gb,
-        limit_ip, links, subscription_url, sub_links
+        limit_ip, links, sub_links
         """
         data = await cls._request("GET", f"{CLIENTS_API}/list")
         raw_clients = [c for c in (data if isinstance(data, list) else []) if isinstance(c, dict)]
@@ -223,10 +216,9 @@ class VPNPanelService:
         async def hydrate(c: dict) -> dict:
             email = c.get("email", "")
             sub_id = c.get("subId", "")
-            links, sub_links, sub_url = await asyncio.gather(
+            links, sub_links = await asyncio.gather(
                 cls.get_client_links(email),
                 cls.get_subscription_links(sub_id),
-                cls.subscription_url(sub_id),
             )
             return {
                 "email": email,
@@ -236,7 +228,6 @@ class VPNPanelService:
                 "total_gb": c.get("totalGB", 0),
                 "limit_ip": c.get("limitIp", 0),
                 "links": links,
-                "subscription_url": sub_url,
                 "sub_links": sub_links,
             }
 

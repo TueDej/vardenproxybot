@@ -65,7 +65,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         package_label = escape(order.package_label)
-        config_block = format_vpn_config(panel["links"], panel["sub_url"])
+        config_block = format_vpn_config(panel["links"])
         await update.message.reply_text(
             f"✅ Order #{order_id} approved.\n"
             f"📦 {package_label} | {order.duration_days} days\n"
@@ -81,8 +81,8 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"🎉 <b>Your order #{order_id} has been approved!</b>\n\n"
                     f"📦 Package: {package_label}\n"
                     f"{config_block}\n\n"
-                    "Import the vless:// link into your V2Ray/Nekoray/Streisand app, "
-                    "or paste the subscription URL into its 'add subscription' field."
+                    "Import the vless:// link into your V2Ray/Nekoray/Streisand app "
+                    "to connect."
                 ),
                 parse_mode="HTML",
             )

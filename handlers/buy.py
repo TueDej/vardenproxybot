@@ -184,7 +184,7 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def approve_order(session, order: Order) -> dict:
     """Atomically approve an order and provision its panel client.
 
-    Returns {"email", "sub_id", "links", "sub_url"}.
+    Returns {"email", "sub_id", "links"}.
 
     Raises OrderAlreadyApproved when another handler claimed the order first,
     and VPNPanelError on panel failures (the claim is reverted to pending).
@@ -250,13 +250,9 @@ async def approve_order(session, order: Order) -> dict:
         await session.commit()
         raise
 
-    sub_url = await VPNPanelService.subscription_url(sub_id)
-    return {"email": email, "sub_id": sub_id, "links": links, "sub_url": sub_url}
+    return {"email": email, "sub_id": sub_id, "links": links}
 
 
-def format_vpn_config(links: list[str], sub_url: str = "") -> str:
-    """Format the config block (vless URIs + subscription URL) for a message."""
-    lines = [f"🔗 <code>{escape(link)}</code>" for link in links if link]
-    if sub_url:
-        lines.append(f"📡 Subscription: <code>{escape(sub_url)}</code>")
-    return "\n".join(lines)
+def format_vpn_config(links: list[str]) -> str:
+    """Format the config block (vless URIs) for a message."""
+    return "\n".join(f"🔗 <code>{escape(link)}</code>" for link in links if link)

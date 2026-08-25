@@ -26,17 +26,12 @@ def _data_label(total_gb: int) -> str:
     return "Unlimited" if total_gb == 0 else f"{total_gb // (1024**3)}GB"
 
 
-def _format_links_block(links: list[str], sub_url: str) -> str:
-    lines = []
-    if sub_url:
-        lines.append("📡 <b>Subscription URL:</b>")
-        lines.append(f"<pre><code>{escape(sub_url)}</code></pre>")
-    if links:
-        if lines:
-            lines.append("")
-        lines.append("🔗 <b>Config links:</b>")
-        for link in links:
-            lines.append(f"<pre><code>{escape(link)}</code></pre>")
+def _format_links_block(links: list[str]) -> str:
+    if not links:
+        return ""
+    lines = ["🔗 <b>Config links:</b>"]
+    for link in links:
+        lines.append(f"<pre><code>{escape(link)}</code></pre>")
     return "\n".join(lines)
 
 
@@ -47,10 +42,12 @@ def _format_product_message(c: dict, expiry_dt: datetime | None, online_emails: 
         remaining = (expiry_dt - datetime.now(timezone.utc)).days
         expiry_line = f"⏳ Expires: {expiry_dt.strftime('%Y-%m-%d')} ({remaining}d left)"
     online_tag = " 🟢 <i>online</i>" if c["email"] in online_emails else ""
+    links_block = _format_links_block(c["links"])
+    suffix = f"\n{links_block}" if links_block else ""
     return (
         f"📦 {_data_label(c['total_gb'])} | {c['limit_ip']} device(s){online_tag}\n"
-        f"{expiry_line}\n"
-        f"{_format_links_block(c['links'], c['subscription_url'])}"
+        f"{expiry_line}"
+        f"{suffix}"
     )
 
 
