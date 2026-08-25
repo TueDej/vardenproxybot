@@ -104,9 +104,23 @@ class Config:
 
     @property
     def zarinpal_base_url(self) -> str:
+        # Kept for backward compat — now points to API host (imitates toodej)
         if self.zarinpal_sandbox:
             return "https://sandbox.zarinpal.com"
-        return "https://payment.zarinpal.com"
+        return "https://api.zarinpal.com"
+
+    @property
+    def zarinpal_api_base_url(self) -> str:
+        if self.zarinpal_sandbox:
+            return "https://sandbox.zarinpal.com"
+        return "https://api.zarinpal.com"
+
+    @property
+    def zarinpal_gateway_base_url(self) -> str:
+        # Imitate toodej: https://zarinpal.com/pg/StartPay/{authority} (no ZarinGate, no payment subdomain)
+        if self.zarinpal_sandbox:
+            return "https://sandbox.zarinpal.com"
+        return "https://zarinpal.com"
 
     @property
     def proxy_url(self) -> str | None:

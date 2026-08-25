@@ -66,7 +66,7 @@ async def _post(path: str, payload: dict, retries: int = 3) -> dict:
         try:
             async with httpx.AsyncClient(trust_env=False, timeout=_TIMEOUT) as client:
                 resp = await client.post(
-                    f"{config.zarinpal_base_url}{path}",
+                    f"{config.zarinpal_api_base_url}{path}",
                     json=payload,
                     headers={"Accept": "application/json", "Content-Type": "application/json"},
                 )
@@ -113,9 +113,9 @@ async def request_payment(order_id: int, amount_toomans: int, description: str) 
         raise ZarinpalError(_error_detail(data, 200, REQUEST_PATH))
     return {
         "authority": authority,
-        # Use ZarinGate to bypass the intermediate checkout page (checkout.toodej.shop)
-        # Directly routes to Shaparak. Panel has no toggle to disable checkout.
-        "startpay_url": f"{config.zarinpal_base_url}/pg/StartPay/{authority}/ZarinGate",
+        # Imitate toodej: no ZarinGate suffix, gateway on zarinpal.com (not payment.zarinpal.com)
+        # toodej: productionGatewayBase = https://zarinpal.com/pg/StartPay/
+        "startpay_url": f"{config.zarinpal_gateway_base_url}/pg/StartPay/{authority}",
     }
 
 
