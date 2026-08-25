@@ -31,13 +31,17 @@ log = logging.getLogger(__name__)
 
 def _build_request() -> HTTPXRequest:
     """Create HTTPXRequest configured with SOCKS5 proxy and timeouts."""
-    kwargs = {
+    kwargs: dict = {
         "connect_timeout": 15.0,
         "read_timeout": 20.0,
+        "write_timeout": 20.0,
+        "pool_timeout": 10.0,
     }
     proxy_url = config.proxy_url
     if proxy_url:
         kwargs["proxy"] = proxy_url
+    # Prevent httpx from inheriting HTTP_PROXY env vars when proxy is explicit.
+    kwargs["httpx_kwargs"] = {"trust_env": False}
     return HTTPXRequest(**kwargs)
 
 
@@ -67,7 +71,11 @@ async def _post_shutdown(application: Application) -> None:
 
 async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route text messages based on button presses."""
-    text = update.message.text
+    msg = update.effective_message
+    if msg is None or not getattr(msg, "text", None):
+        return
+    # Avoid reacting to messages that are actually commands (safety if filter changes)
+    text = (msg.text or "").strip()
 
     # Main menu buttons
     if text == "🛒 خرید اشتراک":
@@ -81,9 +89,19 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🏠 خانه":
         await start(update, context)
 
-    # Buy flow
+    # Buy flow — only known package labels (prevents arbitrary "تومان" texts from creating orders)
     elif text.endswith("تومان"):
-        await package_selected(update, context)
+        # Defer validation to package_selected (checks PACKAGE_MAP) but we guard here
+        # to avoid spamming DB on arbitrary messages; package_selected will reply with error.
+        from handlers.buy import PACKAGE_MAP as _PM
+
+        if text in _PM:
+            await package_selected(update, context)
+        else:
+            await update.effective_message.reply_text(
+                "❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید."
+            )
+            return
     elif text == "❌ انصراف":
         await cancel_order(update, context)
 
@@ -95,7 +113,7 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Unknown
     else:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "❓ گزینه نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید."
         )
 
@@ -115,8 +133,12 @@ def main():
     lock_file = open("/tmp/vardenproxybot.lock", "w")
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except IOError:
+    except (IOError, OSError):
         log.error("Another instance is already running. Exiting.")
+        try:
+            lock_file.close()
+        except Exception:
+            pass
         return
 
     request = _build_request()
@@ -146,7 +168,9 @@ def main():
 
     log.info("Bot is running...")
     if config.proxy_url_redacted:
-        log.info("Proxy: %s", config.proxy_url_redacted)
+        log.info("Proxy: %s (enabled)", config.proxy_url_redacted)
+    else:
+        log.info("Proxy: disabled")
     if config.zarinpal_access_token and config.zarinpal_callback_url:
         log.info(
             "Payments: Zarinpal (%s) | callback %s",

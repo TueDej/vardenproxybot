@@ -141,10 +141,10 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await session.commit()
         context.user_data.pop("order_id", None)
+        # Do not leak gateway internals to the user; log detailed error server-side.
         await update.message.reply_text(
             "❌ <b>خطا در ایجاد پرداخت</b>\n"
-            "لطفاً چند دقیقه بعد دوباره تلاش کنید.\n"
-            f"<code>{escape(str(exc))}</code>",
+            "لطفاً چند دقیقه بعد دوباره تلاش کنید.",
             parse_mode="HTML",
         )
         return
@@ -321,6 +321,19 @@ async def approve_order(session, order: Order) -> dict:
         )
         await session.commit()
         raise
+    except Exception:
+        # Any other failure (DB, unexpected) must also revert the claim to avoid stuck approved without client.
+        await session.rollback()
+        try:
+            await session.execute(
+                sa_update(Order)
+                .where(Order.id == order_id, Order.status == "approved")
+                .values(status="pending")
+            )
+            await session.commit()
+        except Exception:
+            log.error("Failed to revert approved claim for order #%s", order_id, exc_info=True)
+        raise VPNPanelError(f"Provisioning failed for order #{order_id}: unexpected error")
 
     return {"email": email, "sub_id": sub_id, "links": links}
 

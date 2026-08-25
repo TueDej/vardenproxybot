@@ -16,13 +16,13 @@ from vpn_service import VPNPanelError, VPNPanelService
 log = logging.getLogger(__name__)
 
 
-async def _is_admin(update: Update) -> bool:
+def _is_admin(update: Update) -> bool:
     return update.effective_user is not None and update.effective_user.id in config.admin_ids
 
 
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /approve <order_id>"""
-    if not await _is_admin(update):
+    if not _is_admin(update):
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return
 
@@ -94,7 +94,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /pending — list all pending orders"""
-    if not await _is_admin(update):
+    if not _is_admin(update):
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return
 
@@ -104,6 +104,7 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
             .options(selectinload(Order.user))
             .where(Order.status == "pending")
             .order_by(Order.created_at.desc())
+            .limit(50)
         )
         orders = result.scalars().all()
 
@@ -118,12 +119,15 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{escape(o.package_label)} | {o.amount_toomans:,} تومان | "
             f"{o.created_at.strftime('%Y-%m-%d %H:%M')}"
         )
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3990] + "\n… (truncated, 50 shown)"
+    await update.message.reply_text(text, parse_mode="HTML")
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /stats — show server stats"""
-    if not await _is_admin(update):
+    if not _is_admin(update):
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return
 

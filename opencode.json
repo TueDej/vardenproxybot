@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "zarinpal-docs": {
+      "type": "remote",
+      "url": "https://www.zarinpal.com/docs/mcp",
+      "enabled": true
+    }
+  }
+}

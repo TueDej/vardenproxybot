@@ -30,7 +30,7 @@ def build_expiry_ms(duration_days: int) -> int:
     return int(expires.timestamp() * 1000)
 
 
-_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "::"}
 
 
 def rewrite_vless_link(link: str) -> str:
@@ -55,9 +55,22 @@ def rewrite_vless_link(link: str) -> str:
     params = dict(parse_qsl(parts.query, keep_blank_values=True))
 
     # Public domain: transport host param wins over the (backend) authority.
-    public_host = (params.get("host") or "").strip()
-    if ":" in public_host:  # strip any accidental :port suffix
-        public_host = public_host.split(":", 1)[0]
+    raw_host = (params.get("host") or "").strip()
+    # Strip port safely: handle IPv6 literals like [::1]:443
+    public_host = raw_host
+    if public_host.startswith("["):
+        # IPv6 literal with brackets
+        end = public_host.find("]")
+        if end != -1:
+            public_host = public_host[1:end].strip()
+        else:
+            public_host = public_host.strip("[]").strip()
+    elif public_host.count(":") == 1 and public_host.count(".") == 0:
+        # Likely host:port (single colon, no dots) — but avoid splitting IPv6 (multiple colons)
+        public_host = public_host.split(":", 1)[0].strip()
+    elif ":" in public_host and "." in public_host:
+        # host:port with dot (e.g. example.com:443)
+        public_host = public_host.split(":", 1)[0].strip()
     public_host = public_host.strip("[]").strip() or (parts.hostname or "")
     if not public_host:
         return link
@@ -81,7 +94,12 @@ def rewrite_vless_link(link: str) -> str:
     for key, value in params.items():  # any unexpected extras keep their order
         rewritten.setdefault(key, value)
 
-    netloc = f"{parts.username}@{public_host}:{PUBLIC_ENTRY_PORT}"
+    # Bracket IPv6 literals for netloc
+    host_for_netloc = public_host
+    if ":" in public_host and not public_host.startswith("["):
+        # Contains colon -> likely IPv6 without brackets
+        host_for_netloc = f"[{public_host}]"
+    netloc = f"{parts.username}@{host_for_netloc}:{PUBLIC_ENTRY_PORT}"
     return urlunsplit((parts.scheme, netloc, parts.path, urlencode(rewritten), parts.fragment))
 
 
@@ -161,9 +179,15 @@ class VPNPanelService:
                     data = None
                 if isinstance(data, dict):
                     if not data.get("success"):
-                        raise VPNPanelError(f"Panel error [{method} {path}]: {data.get('msg') or resp.status_code}")
-                    return data.get("obj")
-                if data is not None:
+                        msg = data.get("msg") or f"HTTP {resp.status_code}"
+                        # Retry on server errors (5xx), fail fast on client errors (4xx, auth)
+                        if resp.status_code >= 500:
+                            last_error = VPNPanelError(f"Panel error [{method} {path}]: {msg}")
+                        else:
+                            raise VPNPanelError(f"Panel error [{method} {path}]: {msg}")
+                    else:
+                        return data.get("obj")
+                elif data is not None:
                     last_error = VPNPanelError(
                         f"Unexpected JSON payload for {method} {path}: expected an object"
                     )
@@ -194,11 +218,20 @@ class VPNPanelService:
         await cls._request("POST", f"{CLIENTS_API}/add", payload)
 
         # Re-read until the freshly created client shows up in link generation.
-        for _ in range(5):
-            links = normalize_links(await cls._request("GET", f"{CLIENTS_API}/links/{email}"))
-            if links:
-                return {"email": email, "sub_id": sub_id, "links": links}
-            await asyncio.sleep(0.4)
+        try:
+            for _ in range(5):
+                try:
+                    links = normalize_links(await cls._request("GET", f"{CLIENTS_API}/links/{email}"))
+                except VPNPanelError:
+                    await asyncio.sleep(0.4)
+                    continue
+                if links:
+                    return {"email": email, "sub_id": sub_id, "links": links}
+                await asyncio.sleep(0.4)
+        except Exception:
+            # Ensure orphan cleanup even if loop aborted
+            await cls.delete_client(email)
+            raise
 
         # No links appeared — remove the orphan so a retry won't create a duplicate.
         await cls.delete_client(email)
@@ -232,13 +265,17 @@ class VPNPanelService:
         raw_clients = [c for c in (data if isinstance(data, list) else []) if isinstance(c, dict)]
         matching = [c for c in raw_clients if str(c.get("tgId")) == str(telegram_id)]
 
+        # Limit concurrency to avoid panel rate-limit / FD exhaustion (previously 2*N concurrent)
+        sem = asyncio.Semaphore(5)
+
         async def hydrate(c: dict) -> dict:
             email = c.get("email", "")
             sub_id = c.get("subId", "")
-            links, sub_links = await asyncio.gather(
-                cls.get_client_links(email),
-                cls.get_subscription_links(sub_id),
-            )
+            async with sem:
+                links, sub_links = await asyncio.gather(
+                    cls.get_client_links(email),
+                    cls.get_subscription_links(sub_id),
+                )
             return {
                 "email": email,
                 "sub_id": sub_id,

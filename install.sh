@@ -12,7 +12,9 @@ INSTALL_DIR="${VARDEN_INSTALL_DIR:-/opt/vardenproxybot}"
 ENV_FILE="${VARDEN_ENV_FILE:-/etc/vardenproxybot.conf}"
 SERVICE_FILE="${VARDEN_SERVICE_FILE:-/etc/systemd/system/vardenproxybot.service}"
 SERVICE_NAME="vardenproxybot"
-LOG_FILE="/tmp/vardenproxybot_install.log"
+LOG_FILE="$(mktemp /tmp/vardenproxybot_install.XXXXXX.log)"
+# mktemp creates 600, ensure and keep for debugging (secure, no symlink race)
+chmod 600 "$LOG_FILE" 2>/dev/null || true
 
 # ─── Output helpers ──────────────────────────────────────────────────────
 
@@ -36,6 +38,7 @@ info()     { echo -e "  ${DIM}$*${NC}"; }
 VAR_SPEC=(
     "BOT_TOKEN|Telegram Bot Token||true"
     "ADMIN_IDS|Admin Telegram IDs (comma-sep)||true"
+    "PROXY_DISABLED|Disable SOCKS5 proxy? (true/false)|false|false"
     "PROXY_HOST|SOCKS5 Proxy Host|127.0.0.1|false"
     "PROXY_PORT|SOCKS5 Proxy Port|1080|false"
     "PROXY_USER|SOCKS5 Proxy Username (optional)||false"
@@ -79,8 +82,13 @@ prompt_var() {
         # Trim surrounding whitespace without mangling the value (no xargs)
         input="${input#"${input%%[![:space:]]*}"}"
         input="${input%"${input##*[![:space:]]}"}"
-        if [[ "$input" =~ [^A-Za-z0-9\ ._,:/+\@=\~-] ]]; then
-            err "Value contains characters that are unsafe for the env file."
+        # Allow URL-safe chars (?#&=%+) and common env values; block shell metachars ($`|;!*(){}<>\) to prevent injection via source.
+        if [[ "$input" =~ [\$\|\;\`\!\*\(\)\{\}\<\>\\] ]]; then
+            err "Value contains shell metacharacters that are unsafe for the env file."
+            continue
+        fi
+        if [[ "$input" =~ $'\n' ]]; then
+            err "Value must not contain newlines."
             continue
         fi
         if [[ "$required" == "true" ]] && [[ -z "$input" ]]; then
@@ -245,8 +253,8 @@ deploy_source() {
     fi
 
     if [[ ${#DB_FILES[@]} -gt 0 ]]; then
-        BACKUP_DIR="/tmp/vardenproxybot_db_backup_$(date +%Y%m%d%H%M%S)"
-        mkdir -p "$BACKUP_DIR"
+        BACKUP_DIR="$(mktemp -d /tmp/vardenproxybot_db_backup_XXXXXX)"
+        chmod 700 "$BACKUP_DIR" 2>/dev/null || true
         for db in "${DB_FILES[@]}"; do
             cp "$db" "$BACKUP_DIR/"
         done
@@ -254,6 +262,7 @@ deploy_source() {
     fi
 
     mkdir -p "$INSTALL_DIR"
+    chmod 750 "$INSTALL_DIR" 2>/dev/null || true
     # Copy source with excludes (avoids dragging venv/.git/db files through cp)
     tar -C "$SCRIPT_DIR" \
         --exclude='./venv' --exclude='./.git' --exclude='./.kilo' \
@@ -282,6 +291,10 @@ deploy_source() {
 install_dependencies() {
     step "Dependencies"
 
+    # Recreate venv cleanly to avoid stale packages (backup DB already done)
+    if [[ -d "$INSTALL_DIR/venv" ]]; then
+        rm -rf "$INSTALL_DIR/venv" 2>/dev/null || true
+    fi
     python3 -m venv "$INSTALL_DIR/venv" >> "$LOG_FILE" 2>&1
     chown -R "$CURRENT_USER:$CURRENT_GROUP" "$INSTALL_DIR/venv"
     log "Virtual environment created."
@@ -333,9 +346,16 @@ EOF
     chmod 644 "$SERVICE_FILE"
 
     systemctl daemon-reload >> "$LOG_FILE" 2>&1
+    # Graceful stop only — avoid SIGKILL which can corrupt SQLite WAL.
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-    pkill -9 -f "^${INSTALL_DIR}/venv/bin/python main[.]py$" 2>/dev/null || true
-    rm -f /tmp/vardenproxybot.lock
+    # Only kill stale processes if systemd stop failed; use exact match without regex injection.
+    if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+        # Service still active after stop — do not pkill; let systemd handle it.
+        warn "Service still active after stop; not forcing pkill to avoid DB corruption."
+    else
+        # Clean up stale lock if no process holds it (flock is advisory, safe to remove)
+        rm -f /tmp/vardenproxybot.lock 2>/dev/null || true
+    fi
     systemctl enable "$SERVICE_NAME" >> "$LOG_FILE" 2>&1
     systemctl start "$SERVICE_NAME" >> "$LOG_FILE" 2>&1
 

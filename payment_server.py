@@ -40,7 +40,7 @@ def _page(title: str, body: str) -> web.Response:
     )
 
 
-async def _paid_cancelled_flow(application, session, order, authority, outcome) -> web.Response:
+async def _paid_cancelled_flow(application, _session, order, authority, outcome) -> web.Response:
     """A payment succeeded for a cancelled/rejected order — auto-refund it.
 
     Uses Zarinpal's Reverse API (works fee-free within 30 minutes of the
@@ -57,12 +57,12 @@ async def _paid_cancelled_flow(application, session, order, authority, outcome) 
         )
         await _notify_admins(
             application,
-            f"⚠️ <b>پرداخت سفارش لغوشده!</b> سفارش #{oid} (کد پیگیری "
-            f"<code>{outcome['ref_id']}</code>) توسط کاربر لغو شده اما پرداخت آن انجام شد و استرداد خودکار ممکن نشد: {exc}. "
+            f"⚠️ <b>پرداخت سفارش لغوشده!</b> سفارش #{escape(str(oid))} (کد پیگیری "
+            f"<code>{escape(str(outcome['ref_id']))}</code>) توسط کاربر لغو شده اما پرداخت آن انجام شد و استرداد خودکار ممکن نشد: {escape(str(exc))}. "
             "لطفاً دستی رسیدگی کنید.",
         )
         await _notify(application, order.user.telegram_id,
-                      f"ℹ️ سفارش #{oid} قبلاً لغو شده بود، اما پرداخت آن انجام شد؛ تیم پشتیبانی به‌زودی با شما تماس می‌گیرد.")
+                      f"ℹ️ سفارش #{escape(str(oid))} قبلاً لغو شده بود، اما پرداخت آن انجام شد؛ تیم پشتیبانی به‌زودی با شما تماس می‌گیرد.")
         return _page(
             "نیاز به بررسی",
             "سفارش قبلاً لغو شده اما پرداخت انجام شده است؛ تیم پشتیبانی با شما تماس می‌گیرد.",
@@ -72,11 +72,11 @@ async def _paid_cancelled_flow(application, session, order, authority, outcome) 
              oid, outcome["ref_id"])
     await _notify_admins(
         application,
-        f"ℹ️ سفارش لغوشده #{oid} پرداخت شد — مبلغ به‌صورت خودکار مستردد شد "
-        f"(کد پیگیری <code>{outcome['ref_id']}</code>).",
+        f"ℹ️ سفارش لغوشده #{escape(str(oid))} پرداخت شد — مبلغ به‌صورت خودکار مستردد شد "
+        f"(کد پیگیری <code>{escape(str(outcome['ref_id']))}</code>).",
     )
     await _notify(application, order.user.telegram_id,
-                  f"💳 سفارش #{oid} قبلاً لغو شده بود؛ به همین دلیل مبلغ پرداختی به‌صورت خودکار به کارت شما بازگشت داده شد.")
+                  f"💳 سفارش #{escape(str(oid))} قبلاً لغو شده بود؛ به همین دلیل مبلغ پرداختی به‌صورت خودکار به کارت شما بازگشت داده شد.")
     return _page(
         "مبلغ مستردد شد ✅",
         "سفارش لغو شده بود؛ مبلغ پرداختی به‌صورت خودکار به کارت شما بازگشت داده شد.",
@@ -85,8 +85,19 @@ async def _paid_cancelled_flow(application, session, order, authority, outcome) 
 
 async def handle_zarinpal_callback(request: web.Request) -> web.Response:
     application = request.app["ptb_application"]
-    authority = request.rel_url.query.get("Authority", "")
-    status = request.rel_url.query.get("Status", "")
+    # Zarinpal docs: Authority + Status=OK/NOK via query string
+    authority = (request.rel_url.query.get("Authority", "") or "").strip()
+    status = (request.rel_url.query.get("Status", "") or "").strip()
+
+    # Authority is a 6-36 char alphanumeric (sandbox starts with S, live with A); reject overly long/unsafe values.
+    if len(authority) > 64:
+        log.warning("Callback with overly long authority (%d chars); rejecting.", len(authority))
+        return _page("پرداخت انجام نشد", "پرداخت لغو شد یا ناموفق بود. می‌توانید دوباره تلاش کنید.")
+    if authority and not authority.replace("_", "").replace("-", "").isalnum():
+        # Strict alphanumeric check prevents log injection and DoS via weird chars
+        if not all(c.isalnum() or c in "-_" for c in authority):
+            log.warning("Callback with invalid authority characters.")
+            return _page("سفارش یافت نشد", "سفارشی برای این پرداخت پیدا نشد. با پشتیبانی تماس بگیرید.")
 
     if status.upper() != "OK" or not authority:
         log.info("Callback with non-success status (Status=%r)", status)
@@ -100,7 +111,8 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
         )
         order = result.scalar_one_or_none()
         if order is None:
-            log.warning("Callback for unknown authority %s…", authority[:10])
+            # Do not leak authority prefix; log length only to avoid enumeration.
+            log.warning("Callback for unknown authority (len=%d)", len(authority))
             return _page("سفارش یافت نشد", "سفارشی برای این پرداخت پیدا نشد. با پشتیبانی تماس بگیرید.")
 
         chat_id = order.user.telegram_id
@@ -150,10 +162,10 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
     ref = outcome["ref_id"]
     await _notify(
         application, chat_id,
-        f"🎉 <b>پرداخت شما با موفقیت تأیید شد!</b> (سفارش #{oid})\n\n"
+        f"🎉 <b>پرداخت شما با موفقیت تأیید شد!</b> (سفارش #{escape(str(oid))})\n\n"
         "کانفیگ شما آماده است؛ آن را از بخش «👤 پروفایل من» دریافت کنید.",
     )
-    body = f"پرداخت با موفقیت تأیید شد (کد پیگیری: {ref}). به ربات برگردید و کانفیگ خود را دریافت کنید."
+    body = f"پرداخت با موفقیت تأیید شد (کد پیگیری: {escape(str(ref))}). به ربات برگردید و کانفیگ خود را دریافت کنید."
     return _page("پرداخت موفق ✅", body)
 
 

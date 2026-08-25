@@ -8,12 +8,13 @@ MAIN_MENU = [
     ["ℹ️ راهنما و پشتیبانی"],
 ]
 
-HOME_BUTTON = ["🏠 خانه"]
+HOME_BUTTON = ("🏠 خانه",)  # tuple to prevent accidental mutation
+_HOME_ROW = list(HOME_BUTTON)
 
 
 def _package_buttons():
     rows = [[f"{p['label']} - {p['price']:,} تومان"] for p in PACKAGES]
-    rows.append(HOME_BUTTON)
+    rows.append(_HOME_ROW.copy())
     return rows
 
 
@@ -30,11 +31,11 @@ def cancel_keyboard():
     return ReplyKeyboardMarkup(
         [
             ["❌ انصراف"],
-            HOME_BUTTON,
+            _HOME_ROW.copy(),
         ],
         resize_keyboard=True,
     )
 
 
 def home_keyboard():
-    return ReplyKeyboardMarkup([HOME_BUTTON], resize_keyboard=True)
+    return ReplyKeyboardMarkup([_HOME_ROW.copy()], resize_keyboard=True)

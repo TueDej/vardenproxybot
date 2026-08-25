@@ -35,11 +35,11 @@ def _format_links_block(links: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _format_product_message(c: dict, expiry_dt: datetime | None, online_emails: set) -> str:
+def _format_product_message(c: dict, expiry_dt: datetime | None, online_emails: set, now: datetime) -> str:
     if expiry_dt is None:
         expiry_line = "⏳ انقضا: ندارد"
     else:
-        remaining = (expiry_dt - datetime.now(timezone.utc)).days
+        remaining = (expiry_dt - now).days
         expiry_line = f"⏳ انقضا: {expiry_dt.strftime('%Y-%m-%d')} ({remaining} روز باقی‌مانده)"
     online_tag = " 🟢 <i>آنلاین</i>" if c["email"] in online_emails else ""
     links_block = _format_links_block(c["links"])
@@ -69,7 +69,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             f"👤 <b>پروفایل</b>\n\n"
             f"🆔 شناسه کاربری: <code>{user.telegram_id}</code>\n"
-            f"📛 نام: {escape(user.first_name)}\n"
+            f"📛 نام: {escape(user.first_name or '')}\n"
             f"📅 عضو از: {user.created_at.strftime('%Y-%m-%d')}\n\n"
         )
 
@@ -109,16 +109,47 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text + summary, reply_markup=home_keyboard(), parse_mode="HTML"
     )
 
+    # Paginate to avoid flood: max 10 detailed messages, rest truncated
+    max_details = 10
+    sent = 0
+    truncated = False
+
     for c, expiry_dt in active:
-        await update.message.reply_text(
-            _format_product_message(c, expiry_dt, online_emails),
-            parse_mode="HTML",
-        )
+        if sent >= max_details:
+            truncated = True
+            break
+        msg = _format_product_message(c, expiry_dt, online_emails, now)
+        if len(msg) > 4000:
+            msg = msg[:3990] + "…"
+        await update.message.reply_text(msg, parse_mode="HTML")
+        sent += 1
 
     for c, expiry_dt in expired:
-        when = "نامشخص" if expiry_dt is None else expiry_dt.strftime("%Y-%m-%d")
+        if sent >= max_details:
+            truncated = True
+            break
+        when = expiry_dt.strftime("%Y-%m-%d") if expiry_dt else "نامشخص"
         await update.message.reply_text(
             f"⌛ <b>منقضی‌شده</b> — {_data_label(c['total_gb'])}، پایان: {when}\n"
             "برای تمدید، گزینه 🛒 خرید اشتراک را انتخاب کنید.",
+            parse_mode="HTML",
+        )
+        sent += 1
+
+    for c, expiry_dt in disabled:
+        if sent >= max_details:
+            truncated = True
+            break
+        await update.message.reply_text(
+            f"🚫 <b>غیرفعال</b> — {_data_label(c['total_gb'])} | {c['limit_ip']} دستگاه\n"
+            f"⏳ انقضا: {expiry_dt.strftime('%Y-%m-%d') if expiry_dt else 'ندارد'}\n"
+            "با پشتیبانی تماس بگیرید.",
+            parse_mode="HTML",
+        )
+        sent += 1
+
+    if truncated:
+        await update.message.reply_text(
+            f"ℹ️ تعداد اشتراک‌ها زیاد است؛ فقط {max_details} مورد نمایش داده شد. برای مشاهده بقیه با پشتیبانی تماس بگیرید.",
             parse_mode="HTML",
         )
