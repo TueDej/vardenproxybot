@@ -1,3 +1,4 @@
+# Requires Python >= 3.10 (PEP 604 `X | None` unions)
 python-telegram-bot[job-queue]>=21.4
 SQLAlchemy>=2.0.37
 aiosqlite==0.20.0

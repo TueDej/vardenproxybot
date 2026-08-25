@@ -1,16 +1,28 @@
+import logging
+from html import escape
+
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
-from handlers.buy import _approve_order, format_vpn_config
+from handlers.buy import OrderAlreadyApproved, approve_order, format_vpn_config
 from models import Order
 from vpn_service import VPNPanelError, VPNPanelService
+
+log = logging.getLogger(__name__)
+
+
+async def _is_admin(update: Update) -> bool:
+    return update.effective_user is not None and update.effective_user.id in config.admin_ids
 
 
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /approve <order_id>"""
-    if update.effective_user.id not in config.admin_ids:
+    if not await _is_admin(update):
         await update.message.reply_text("⛔ Access denied.")
         return
 
@@ -25,8 +37,9 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     async with async_session() as session:
-        from sqlalchemy import select
-        result = await session.execute(select(Order).where(Order.id == order_id))
+        result = await session.execute(
+            select(Order).options(selectinload(Order.user)).where(Order.id == order_id)
+        )
         order = result.scalar_one_or_none()
 
         if not order:
@@ -37,52 +50,61 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"⚠️ Order #{order_id} is already approved.")
             return
 
-        order.status = "approved"
         try:
-            panel = await _approve_order(session, order)
-        except VPNPanelError as exc:
-            await session.rollback()
+            panel = await approve_order(session, order)
+        except OrderAlreadyApproved:
             await update.message.reply_text(
-                f"❌ Panel error — order #{order_id} was NOT approved.\n<code>{exc}</code>",
+                f"⚠️ Order #{order_id} was just approved by someone else."
+            )
+            return
+        except VPNPanelError as exc:
+            await update.message.reply_text(
+                f"❌ Panel error — order #{order_id} was NOT approved.\n<code>{escape(str(exc))}</code>",
                 parse_mode="HTML",
             )
             return
 
-        sub_url = await VPNPanelService.subscription_url(panel["sub_id"])
+        package_label = escape(order.package_label)
+        config_block = format_vpn_config(panel["links"], panel["sub_url"])
         await update.message.reply_text(
             f"✅ Order #{order_id} approved.\n"
-            f"📦 {order.package_label} | {order.duration_days} days\n"
-            f"{format_vpn_config(panel['links'], sub_url)}",
+            f"📦 {package_label} | {order.duration_days} days\n"
+            f"{config_block}",
             parse_mode="HTML",
         )
 
-        # Notify user
+        # Notify the user (selectinload above makes .user safe to access here)
         try:
             await context.bot.send_message(
                 chat_id=order.user.telegram_id,
                 text=(
                     f"🎉 <b>Your order #{order_id} has been approved!</b>\n\n"
-                    f"📦 Package: {order.package_label}\n"
-                    f"{format_vpn_config(panel['links'], sub_url)}\n\n"
+                    f"📦 Package: {package_label}\n"
+                    f"{config_block}\n\n"
                     "Import the vless:// link into your V2Ray/Nekoray/Streisand app, "
                     "or paste the subscription URL into its 'add subscription' field."
                 ),
                 parse_mode="HTML",
             )
-        except Exception:
-            pass
+        except TelegramError as exc:
+            log.warning(
+                "Could not notify user %s about approval of order #%s: %s",
+                order.user.telegram_id, order_id, exc,
+            )
 
 
 async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /pending — list all pending orders"""
-    if update.effective_user.id not in config.admin_ids:
+    if not await _is_admin(update):
         await update.message.reply_text("⛔ Access denied.")
         return
 
     async with async_session() as session:
-        from sqlalchemy import select
         result = await session.execute(
-            select(Order).where(Order.status == "pending").order_by(Order.created_at.desc())
+            select(Order)
+            .options(selectinload(Order.user))
+            .where(Order.status == "pending")
+            .order_by(Order.created_at.desc())
         )
         orders = result.scalars().all()
 
@@ -94,22 +116,23 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for o in orders:
         lines.append(
             f"#{o.id} | User: <code>{o.user.telegram_id}</code> | "
-            f"{o.package_label} | ${o.amount_usd} | {o.created_at.strftime('%Y-%m-%d %H:%M')}"
+            f"{escape(o.package_label)} | {o.amount_toomans:,} Toomans | "
+            f"{o.created_at.strftime('%Y-%m-%d %H:%M')}"
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /stats — show server stats"""
-    if update.effective_user.id not in config.admin_ids:
+    if not await _is_admin(update):
         await update.message.reply_text("⛔ Access denied.")
         return
 
     status = await VPNPanelService.get_server_status()
     text = (
         "📊 <b>Server Stats</b>\n\n"
-        f"🖥 Panel: {status['server']}\n"
-        f"🟢 Status: {status['status']}\n"
+        f"🖥 Panel: {escape(status['server'])}\n"
+        f"🟢 Status: {escape(str(status['status']))}\n"
         f"🟢 Online now: {status['online_users']}\n"
         f"👥 Inbound clients: {status['inbound_clients']}"
     )

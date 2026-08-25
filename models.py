@@ -30,8 +30,12 @@ class Order(Base):
     package_label: Mapped[str] = mapped_column(String(64), nullable=False)
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
     data_gb: Mapped[int] = mapped_column(Integer, nullable=False)
-    amount_usd: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, approved, rejected
+    amount_toomans: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), default="pending"
+    )  # pending, approved, rejected, cancelled
+    panel_email: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sub_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

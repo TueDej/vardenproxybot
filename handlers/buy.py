@@ -1,3 +1,8 @@
+import logging
+from html import escape
+
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -8,26 +13,42 @@ from models import Order, User
 from packages import DURATION_DAYS, PACKAGES
 from vpn_service import VPNPanelError, VPNPanelService
 
-# Lookup maps for text-based selection
-PACKAGE_MAP = {}
-for p in PACKAGES:
-    key = f"{p['label']} - {p['price']:,} Toomans"
-    PACKAGE_MAP[key] = p
+log = logging.getLogger(__name__)
+
+# Lookup map for text-based package selection
+PACKAGE_MAP = {
+    f"{p['label']} - {p['price']:,} Toomans": p for p in PACKAGES
+}
 
 
-async def _get_or_create_user(session, telegram_user) -> User:
-    from sqlalchemy import select
+class OrderAlreadyApproved(Exception):
+    """Raised when another handler approved the order first."""
+
+
+async def get_or_create_user(session, telegram_user) -> User:
     result = await session.execute(select(User).where(User.telegram_id == telegram_user.id))
     user = result.scalar_one_or_none()
-    if user is None:
-        user = User(
-            telegram_id=telegram_user.id,
-            username=telegram_user.username,
-            first_name=telegram_user.first_name,
-        )
-        session.add(user)
+    if user is not None:
+        if user.username != telegram_user.username or user.first_name != telegram_user.first_name:
+            user.username = telegram_user.username
+            user.first_name = telegram_user.first_name or user.first_name
+            await session.commit()
+        return user
+
+    user = User(
+        telegram_id=telegram_user.id,
+        username=telegram_user.username,
+        first_name=telegram_user.first_name,
+    )
+    session.add(user)
+    try:
         await session.commit()
-        await session.refresh(user)
+    except IntegrityError:  # concurrent insert raced us — reuse the winner's row
+        await session.rollback()
+        result = await session.execute(select(User).where(User.telegram_id == telegram_user.id))
+        user = result.scalar_one_or_none()
+        if user is None:
+            raise
     return user
 
 
@@ -48,13 +69,19 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     async with async_session() as session:
-        user = await _get_or_create_user(session, update.effective_user)
+        user = await get_or_create_user(session, update.effective_user)
+        # Supersede earlier pending orders so they can't stack up.
+        await session.execute(
+            update(Order)
+            .where(Order.user_id == user.id, Order.status == "pending")
+            .values(status="cancelled")
+        )
         order = Order(
             user_id=user.id,
             package_label=pkg["label"],
             duration_days=DURATION_DAYS,
             data_gb=pkg["data_gb"],
-            amount_usd=pkg["price"],
+            amount_toomans=pkg["price"],
             status="pending",
         )
         session.add(order)
@@ -66,7 +93,7 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     separator = "─" * 20
     payment_text = (
         f"💳 <b>Order #{order.id}</b>\n\n"
-        f"📦 Package: {pkg['label']}\n"
+        f"📦 Package: {escape(pkg['label'])}\n"
         f"📅 Duration: 1 Month\n"
         f"💰 Amount: <b>{pkg['price']:,} Toomans</b>\n\n"
         f"{separator}\n"
@@ -87,32 +114,37 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     async with async_session() as session:
-        from sqlalchemy import select
         result = await session.execute(select(Order).where(Order.id == order_id))
         order = result.scalar_one_or_none()
         if not order:
             await update.message.reply_text("❌ Order not found.")
             return
 
-        order_id = order.id
-
         if config.auto_approve:
-            order.status = "approved"
+            # Snapshot now — approve_order's rollback on failure expires ORM attrs.
+            oid = order.id
             try:
-                await _approve_order(session, order)
+                await approve_order(session, order)
+            except OrderAlreadyApproved:
+                context.user_data.pop("order_id", None)
+                await update.message.reply_text(
+                    f"✅ Order #{oid} was already approved.",
+                    reply_markup=back_keyboard(),
+                    parse_mode="HTML",
+                )
+                return
             except VPNPanelError as exc:
-                await session.rollback()
                 await update.message.reply_text(
                     f"❌ <b>Panel error</b> — could not create your config.\n"
-                    f"Order #{order_id} is still pending. Please try again later.\n"
-                    f"<code>{exc}</code>",
+                    f"Order #{oid} is still pending. Please try again later.\n"
+                    f"<code>{escape(str(exc))}</code>",
                     parse_mode="HTML",
                 )
                 return
             context.user_data.pop("order_id", None)
             await update.message.reply_text(
                 f"✅ <b>Payment Confirmed!</b>\n\n"
-                f"Order #{order.id} has been approved.\n"
+                f"Order #{oid} has been approved.\n"
                 f"Your VPN config is ready — check <b>👤 My Profile</b>.",
                 reply_markup=back_keyboard(),
                 parse_mode="HTML",
@@ -134,11 +166,10 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     async with async_session() as session:
-        from sqlalchemy import select
         result = await session.execute(select(Order).where(Order.id == order_id))
         order = result.scalar_one_or_none()
         if order and order.status == "pending":
-            order.status = "rejected"
+            order.status = "cancelled"
             await session.commit()
 
     context.user_data.pop("order_id", None)
@@ -149,19 +180,82 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def _approve_order(session, order: Order) -> dict:
-    """Create the client on the panel. Returns the panel result dict."""
-    from sqlalchemy import select
-    result = await session.execute(select(User).where(User.id == order.user_id))
-    user = result.scalar_one()
-    panel = await VPNPanelService.create_client(user.telegram_id, order.duration_days, order.data_gb)
+async def approve_order(session, order: Order) -> dict:
+    """Atomically approve an order and provision its panel client.
+
+    Returns {"email", "sub_id", "links", "sub_url"}.
+
+    Raises OrderAlreadyApproved when another handler claimed the order first,
+    and VPNPanelError on panel failures (the claim is reverted to pending).
+    Persistence uses explicit UPDATEs so it works even if ``order`` is not
+    attached to ``session``; the instance is kept in sync for the caller.
+    """
+    # Snapshot identifiers up front: rollback() expires instance attributes,
+    # and reading them afterwards would trigger an illegal sync lazy-load.
+    order_id = order.id
+    claim = await session.execute(
+        update(Order)
+        .where(Order.id == order_id, Order.status != "approved")
+        .values(status="approved")
+    )
+    if claim.rowcount == 0:
+        raise OrderAlreadyApproved(order.id)
     await session.commit()
-    return panel
+    order.status = "approved"
+
+    async def _set(**values):
+        await session.execute(update(Order).where(Order.id == order_id).values(**values))
+        await session.commit()
+
+    try:
+        email = order.panel_email
+        sub_id = order.sub_id or ""
+        links = []
+        if email:
+            # Partial provisioning happened before — try to reuse the client.
+            links = await VPNPanelService.get_client_links(email) or \
+                await VPNPanelService.get_subscription_links(sub_id)
+            if links:
+                log.info("Order #%s: reusing existing panel client %s", order_id, email)
+            else:
+                # Client vanished from the panel — drop the stale reference.
+                log.warning(
+                    "Order #%s: panel client %s has no links; provisioning fresh.",
+                    order_id, email,
+                )
+                await _set(panel_email=None, sub_id=None)
+                order.panel_email = None
+                order.sub_id = None
+
+        if not links:
+            result = await session.execute(select(User).where(User.id == order.user_id))
+            user = result.scalar_one()
+            panel = await VPNPanelService.create_client(
+                user.telegram_id, order.duration_days, order.data_gb
+            )
+            email = panel["email"]
+            sub_id = panel["sub_id"]
+            links = panel["links"]
+            await _set(panel_email=email, sub_id=sub_id)
+            order.panel_email = email
+            order.sub_id = sub_id
+    except VPNPanelError:
+        await session.rollback()
+        await session.execute(
+            update(Order)
+            .where(Order.id == order_id, Order.status == "approved")
+            .values(status="pending")
+        )
+        await session.commit()
+        raise
+
+    sub_url = await VPNPanelService.subscription_url(sub_id)
+    return {"email": email, "sub_id": sub_id, "links": links, "sub_url": sub_url}
 
 
 def format_vpn_config(links: list[str], sub_url: str = "") -> str:
     """Format the config block (vless URIs + subscription URL) for a message."""
-    lines = [f"🔗 <code>{link}</code>" for link in links if link]
+    lines = [f"🔗 <code>{escape(link)}</code>" for link in links if link]
     if sub_url:
-        lines.append(f"📡 Subscription: <code>{sub_url}</code>")
+        lines.append(f"📡 Subscription: <code>{escape(sub_url)}</code>")
     return "\n".join(lines)

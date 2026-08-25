@@ -1,3 +1,5 @@
+from html import escape
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -7,7 +9,7 @@ from keyboards import main_menu_keyboard
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     welcome_text = (
-        f"👋 Welcome, {user.first_name}!\n\n"
+        f"👋 Welcome, {escape(user.first_name)}!\n\n"
         "Welcome to <b>VardenProxy</b> — your gateway to a free and secure internet.\n\n"
         "🛒 <b>Buy Subscription</b> — choose a package and get instant access.\n"
         "👤 <b>My Profile</b> — view your active subscriptions and config links.\n"

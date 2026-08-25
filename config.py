@@ -1,10 +1,25 @@
+import logging
 import os
 from dataclasses import dataclass, field
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+log = logging.getLogger(__name__)
+
+
+def _int_env(name: str, default: int) -> int:
+    """Parse an integer env var; warn and fall back to the default on garbage input."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        log.warning("Invalid %s=%r is not an integer — using %s instead.", name, raw, default)
+        return default
 
 
 @dataclass
@@ -42,15 +57,15 @@ class Config:
 
         # Proxy settings
         self.proxy_host = os.getenv("PROXY_HOST", self.proxy_host)
-        self.proxy_port = int(os.getenv("PROXY_PORT", self.proxy_port))
+        self.proxy_port = _int_env("PROXY_PORT", self.proxy_port)
         self.proxy_user = os.getenv("PROXY_USER", self.proxy_user)
         self.proxy_pass = os.getenv("PROXY_PASS", self.proxy_pass)
 
         # 3x-ui panel settings
         self.panel_url = os.getenv("PANEL_URL", "").rstrip("/")
         self.panel_api_token = os.getenv("PANEL_API_TOKEN", "")
-        self.xui_inbound_id = int(os.getenv("XUI_INBOUND_ID", "0") or 0)
-        self.vpn_limit_ip = int(os.getenv("VPN_LIMIT_IP", "2") or 0)
+        self.xui_inbound_id = _int_env("XUI_INBOUND_ID", 0)
+        self.vpn_limit_ip = _int_env("VPN_LIMIT_IP", self.vpn_limit_ip)
         self.panel_verify_ssl = os.getenv("PANEL_VERIFY_SSL", "true").lower() == "true"
 
     @property
@@ -63,6 +78,20 @@ class Config:
         if not self.proxy_user and not self.proxy_pass:
             return f"socks5://{self.proxy_host}:{self.proxy_port}"
         return f"socks5://{quote(self.proxy_user)}:{quote(self.proxy_pass)}@{self.proxy_host}:{self.proxy_port}"
+
+    @property
+    def proxy_url_redacted(self) -> str | None:
+        """Proxy URL safe for logs — credentials masked."""
+        url = self.proxy_url
+        if not url:
+            return None
+        parts = urlsplit(url)
+        netloc = parts.hostname or ""
+        if parts.port:
+            netloc = f"{netloc}:{parts.port}"
+        if parts.username:
+            netloc = f"{parts.username}:***@{netloc}"
+        return parts._replace(netloc=netloc).geturl()
 
 
 config = Config()

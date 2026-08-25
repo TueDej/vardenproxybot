@@ -76,7 +76,13 @@ prompt_var() {
         else
             read -rp "  $prompt_text: " input
         fi
-        input="$(echo "$input" | xargs)"
+        # Trim surrounding whitespace without mangling the value (no xargs)
+        input="${input#"${input%%[![:space:]]*}"}"
+        input="${input%"${input##*[![:space:]]}"}"
+        if [[ "$input" =~ [^A-Za-z0-9\ ._,:/+\@=\~-] ]]; then
+            err "Value contains characters that are unsafe for the env file."
+            continue
+        fi
         if [[ "$is_required" == "true" ]] && [[ -z "$input" ]]; then
             err "Required field."
             continue
@@ -119,11 +125,11 @@ if [[ -f "$ENV_FILE" ]]; then
         cat >> "$local_tmp" <<EOF
 
 # 3x-ui Panel — updated $(date -Iseconds)
-PANEL_URL=$PANEL_URL
-PANEL_API_TOKEN=$PANEL_API_TOKEN
-XUI_INBOUND_ID=$XUI_INBOUND_ID
-VPN_LIMIT_IP=${VPN_LIMIT_IP:-2}
-PANEL_VERIFY_SSL=${PANEL_VERIFY_SSL:-true}
+PANEL_URL="$PANEL_URL"
+PANEL_API_TOKEN="$PANEL_API_TOKEN"
+XUI_INBOUND_ID="$XUI_INBOUND_ID"
+VPN_LIMIT_IP="${VPN_LIMIT_IP:-2}"
+PANEL_VERIFY_SSL="${PANEL_VERIFY_SSL:-true}"
 EOF
         mv "$local_tmp" "$ENV_FILE"
         chmod 600 "$ENV_FILE"
@@ -162,19 +168,19 @@ else
     cat > "$ENV_FILE" <<EOF
 # VardenProxy Bot environment — sourced by systemd
 # Generated $(date -Iseconds)
-BOT_TOKEN=$BOT_TOKEN
-ADMIN_IDS=$ADMIN_IDS
-AUTO_APPROVE=$AUTO_APPROVE
-PROXY_HOST=$PROXY_HOST
-PROXY_PORT=$PROXY_PORT
-PROXY_USER=$PROXY_USER
-PROXY_PASS=$PROXY_PASS
-DATABASE_URL=$DATABASE_URL
-PANEL_URL=$PANEL_URL
-PANEL_API_TOKEN=$PANEL_API_TOKEN
-XUI_INBOUND_ID=$XUI_INBOUND_ID
-VPN_LIMIT_IP=$VPN_LIMIT_IP
-PANEL_VERIFY_SSL=$PANEL_VERIFY_SSL
+BOT_TOKEN="$BOT_TOKEN"
+ADMIN_IDS="$ADMIN_IDS"
+AUTO_APPROVE="$AUTO_APPROVE"
+PROXY_HOST="$PROXY_HOST"
+PROXY_PORT="$PROXY_PORT"
+PROXY_USER="$PROXY_USER"
+PROXY_PASS="$PROXY_PASS"
+DATABASE_URL="$DATABASE_URL"
+PANEL_URL="$PANEL_URL"
+PANEL_API_TOKEN="$PANEL_API_TOKEN"
+XUI_INBOUND_ID="$XUI_INBOUND_ID"
+VPN_LIMIT_IP="$VPN_LIMIT_IP"
+PANEL_VERIFY_SSL="$PANEL_VERIFY_SSL"
 EOF
     chmod 600 "$ENV_FILE"
     chown "$CURRENT_USER:$CURRENT_GROUP" "$ENV_FILE"
@@ -203,14 +209,15 @@ if [[ ${#DB_FILES[@]} -gt 0 ]]; then
 fi
 
 mkdir -p "$INSTALL_DIR"
-cp -r "$SCRIPT_DIR"/* "$INSTALL_DIR/"
-
-# Clean dev artifacts
-rm -rf "$INSTALL_DIR/.git" "$INSTALL_DIR/venv" "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.example"
-rm -rf "$INSTALL_DIR"/__pycache__ "$INSTALL_DIR"/handlers/__pycache__
-rm -f "$INSTALL_DIR"/*.pyc "$INSTALL_DIR"/handlers/*.pyc 2>/dev/null || true
-rm -f "$INSTALL_DIR"/install.sh 2>/dev/null || true
-rm -f "$INSTALL_DIR"/vardenproxy.db 2>/dev/null || true
+# Copy source with excludes (avoids dragging venv/.git/db files through cp)
+tar -C "$SCRIPT_DIR" \
+    --exclude='./venv' --exclude='./.git' --exclude='./.kilo' \
+    --exclude='./.env' --exclude='./.env.example' \
+    --exclude='__pycache__' --exclude='*.pyc' \
+    --exclude='*.db' --exclude='*.sqlite3' --exclude='*.sqlite' \
+    --exclude='./install.sh' \
+    -cf - . | tar -C "$INSTALL_DIR" -xf -
+rm -rf "$INSTALL_DIR/handlers/__pycache__" 2>/dev/null || true
 
 # Restore databases
 if [[ ${#DB_FILES[@]} -gt 0 ]]; then
@@ -278,13 +285,18 @@ chmod 644 "$SERVICE_FILE"
 
 systemctl daemon-reload >> "$LOG_FILE" 2>&1
 systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-pkill -9 -f "$INSTALL_DIR/venv/bin/python.*main.py" 2>/dev/null || true
+pkill -9 -f "^${INSTALL_DIR}/venv/bin/python main[.]py$" 2>/dev/null || true
 rm -f /tmp/vardenproxybot.lock
 systemctl enable "$SERVICE_NAME" >> "$LOG_FILE" 2>&1
 systemctl start "$SERVICE_NAME" >> "$LOG_FILE" 2>&1
 
-sleep 2
-SERVICE_STATUS=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo "unknown")
+# Wait briefly for the service to come up before reporting status.
+SERVICE_STATUS="unknown"
+for _ in 1 2 3; do
+    sleep 2
+    SERVICE_STATUS=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo "unknown")
+    [[ "$SERVICE_STATUS" == "active" ]] && break
+done
 
 # ─── 6. Summary ─────────────────────────────────────────────────────────
 

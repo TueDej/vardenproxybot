@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -7,6 +8,8 @@ from urllib.parse import urlparse
 import httpx
 
 from config import config
+
+log = logging.getLogger(__name__)
 
 CLIENTS_API = "/panel/api/clients"
 INBOUNDS_API = "/panel/api/inbounds"
@@ -144,10 +147,14 @@ class VPNPanelService:
                         f"Non-JSON response (HTTP {resp.status_code}) for {method} {path}{suffix}"
                     )
                     data = None
-                if data is not None:
+                if isinstance(data, dict):
                     if not data.get("success"):
                         raise VPNPanelError(f"Panel error [{method} {path}]: {data.get('msg') or resp.status_code}")
                     return data.get("obj")
+                if data is not None:
+                    last_error = VPNPanelError(
+                        f"Unexpected JSON payload for {method} {path}: expected an object"
+                    )
             if attempt < retries:
                 await asyncio.sleep(0.5 * attempt)
         raise last_error or VPNPanelError("Panel request failed.")
@@ -180,6 +187,9 @@ class VPNPanelService:
             if links:
                 return {"email": email, "sub_id": sub_id, "links": links}
             await asyncio.sleep(0.4)
+
+        # No links appeared — remove the orphan so a retry won't create a duplicate.
+        await cls.delete_client(email)
         raise VPNPanelError(f"Client {email} was created but no config links were returned.")
 
     @classmethod
@@ -189,7 +199,7 @@ class VPNPanelService:
             await cls._request("POST", f"{CLIENTS_API}/del/{email}")
             return True
         except VPNPanelError as exc:
-            print(f"WARN: failed to delete panel client {email}: {exc}")
+            log.warning("Failed to delete panel client %s: %s", email, exc)
             return False
 
     @classmethod
@@ -207,32 +217,30 @@ class VPNPanelService:
         limit_ip, links, subscription_url, sub_links
         """
         data = await cls._request("GET", f"{CLIENTS_API}/list")
-        raw_clients = data if isinstance(data, list) else []
-        results = []
-        for c in raw_clients:
-            if not isinstance(c, dict):
-                continue
-            if str(c.get("tgId")) != str(telegram_id):
-                continue
+        raw_clients = [c for c in (data if isinstance(data, list) else []) if isinstance(c, dict)]
+        matching = [c for c in raw_clients if str(c.get("tgId")) == str(telegram_id)]
+
+        async def hydrate(c: dict) -> dict:
             email = c.get("email", "")
             sub_id = c.get("subId", "")
-            links = await cls.get_client_links(email)
-            sub_links = await cls.get_subscription_links(sub_id) if sub_id else []
-            sub_url = await cls.subscription_url(sub_id) if sub_id else ""
-            results.append(
-                {
-                    "email": email,
-                    "sub_id": sub_id,
-                    "enable": c.get("enable", True),
-                    "expiry_time": c.get("expiryTime", 0),
-                    "total_gb": c.get("totalGB", 0),
-                    "limit_ip": c.get("limitIp", 0),
-                    "links": links,
-                    "subscription_url": sub_url,
-                    "sub_links": sub_links,
-                }
+            links, sub_links, sub_url = await asyncio.gather(
+                cls.get_client_links(email),
+                cls.get_subscription_links(sub_id),
+                cls.subscription_url(sub_id),
             )
-        return results
+            return {
+                "email": email,
+                "sub_id": sub_id,
+                "enable": c.get("enable", True),
+                "expiry_time": c.get("expiryTime", 0),
+                "total_gb": c.get("totalGB", 0),
+                "limit_ip": c.get("limitIp", 0),
+                "links": links,
+                "subscription_url": sub_url,
+                "sub_links": sub_links,
+            }
+
+        return list(await asyncio.gather(*(hydrate(c) for c in matching)))
 
     @classmethod
     async def get_subscription_links(cls, sub_id: str) -> list[str]:

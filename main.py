@@ -1,4 +1,9 @@
+import asyncio
+import fcntl
+import logging
+
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -9,7 +14,7 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 from config import config
-from database import async_session, init_db
+from database import init_db
 from handlers.admin import approve, pending, stats
 from handlers.buy import (
     buy_start,
@@ -20,6 +25,8 @@ from handlers.buy import (
 from handlers.profile import profile
 from handlers.start import help_command, start
 from vpn_service import VPNPanelService
+
+log = logging.getLogger(__name__)
 
 
 def _build_request() -> HTTPXRequest:
@@ -32,6 +39,18 @@ def _build_request() -> HTTPXRequest:
     if proxy_url:
         kwargs["proxy"] = proxy_url
     return HTTPXRequest(**kwargs)
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log unhandled handler exceptions and tell the user something went wrong."""
+    log.error("Unhandled error processing update", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "⚠️ Something went wrong. Please try again later."
+            )
+        except TelegramError:
+            log.warning("Could not deliver error notice to the user.")
 
 
 async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,17 +83,22 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
     if not config.bot_token:
-        print("ERROR: BOT_TOKEN is not set in .env")
+        log.error("BOT_TOKEN is not set in .env")
         return
 
     # Prevent multiple instances using a file lock
-    import fcntl
     lock_file = open("/tmp/vardenproxybot.lock", "w")
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except IOError:
-        print("ERROR: Another instance is already running. Exiting.")
+        log.error("Another instance is already running. Exiting.")
         return
 
     request = _build_request()
@@ -84,8 +108,11 @@ def main():
         .token(config.bot_token)
         .request(request)
         .get_updates_request(request)
+        .concurrent_updates(True)
         .build()
     )
+
+    app.add_error_handler(on_error)
 
     # Commands
     app.add_handler(CommandHandler("start", start))
@@ -97,17 +124,16 @@ def main():
     # Text messages (reply keyboard)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
 
-    print("🤖 Bot is running...")
-    if config.proxy_url:
-        print(f"🧦 Proxy: {config.proxy_url}")
+    log.info("Bot is running...")
+    if config.proxy_url_redacted:
+        log.info("Proxy: %s", config.proxy_url_redacted)
     if not VPNPanelService.is_configured():
-        print("WARN: 3x-ui panel not configured; approvals will fail until PANEL_* vars are set.")
+        log.warning("3x-ui panel not configured; approvals will fail until PANEL_* vars are set.")
     else:
-        print(f"🔒 Panel: {config.panel_url} | inbound #{config.xui_inbound_id}")
+        log.info("Panel: %s | inbound #%s", config.panel_url, config.xui_inbound_id)
     app.run_polling()
 
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(init_db())
     main()
