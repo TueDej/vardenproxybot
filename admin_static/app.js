@@ -230,32 +230,41 @@ function onPkgInput(e) {
   const field = target.dataset.field;
   const val = target.value;
 
-  // Preserve focus across rerender
-  const active = document.activeElement;
-  const activeIdx = active?.dataset?.idx;
-  const activeField = active?.dataset?.field;
-  const selStart = active?.selectionStart;
-  const selEnd = active?.selectionEnd;
+  if (field === "label") {
+    packagesState.packages[idx][field] = val;
+    return;
+  }
 
-  if (field === "label") packagesState.packages[idx][field] = val;
-  else if (field === "data_gb") packagesState.packages[idx][field] = parseInt(val || "0", 10);
-  else if (field === "price") packagesState.packages[idx][field] = parseInt(val || "0", 10);
+  if (field === "price") {
+    packagesState.packages[idx][field] = parseInt(val || "0", 10);
+    return;
+  }
 
-  // Live price preview without losing focus
-  if (field === "data_gb" || field === "label") {
-    const needsFull = field === "data_gb";
-    if (needsFull) {
-      renderPackages();
-      // restore focus to the same input
-      if (activeIdx !== undefined && activeField) {
-        const newInput = document.querySelector(`input[data-idx="${activeIdx}"][data-field="${activeField}"]`);
-        if (newInput) {
-          newInput.focus();
-          try {
-            if (selStart !== null && selEnd !== null) newInput.setSelectionRange(selStart, selEnd);
-          } catch {}
-        }
+  if (field === "data_gb") {
+    const newGb = parseInt(val || "0", 10);
+    packagesState.packages[idx][field] = Number.isNaN(newGb) ? 0 : newGb;
+
+    // Update discount and price cells inline without destroying focused input
+    const row = target.closest("tr");
+    if (row) {
+      const discCell = row.cells[2];
+      const priceCell = row.cells[3];
+      const gb = packagesState.packages[idx].data_gb;
+      const disc = gb === 0 ? "—" : (calcDiscount(gb) * 100).toFixed(1) + "%";
+      discCell.textContent = disc;
+      discCell.className = "muted";
+      if (gb === 0) {
+        // Switched to Unlimited — need price input
+        priceCell.innerHTML = `<input type="number" data-idx="${idx}" data-field="price" value="${packagesState.packages[idx].price || 500000}" min="1000" max="10000000" step="1000">`;
+        const newPriceInput = priceCell.querySelector('input');
+        if (newPriceInput) newPriceInput.addEventListener('input', onPkgInput);
+      } else {
+        const price = calcPrice(packagesState.base_price_per_gb, gb);
+        priceCell.innerHTML = `<span>${fmtAmount(price)}</span> <span class="muted small">[${disc} off]</span>`;
       }
+    } else {
+      // Fallback: full rerender if row not found
+      renderPackages();
     }
   }
 }
@@ -285,8 +294,20 @@ $("#pkg-add")?.addEventListener("click", () => {
 
 $("#base-price")?.addEventListener("input", () => {
   const base = parseInt($("#base-price").value || "0", 10);
-  packagesState.base_price_per_gb = base;
-  renderPackages();
+  packagesState.base_price_per_gb = Number.isNaN(base) ? 0 : base;
+  // Inline update all price cells without full rerender to keep focus on base input and avoid churn
+  const rows = document.querySelectorAll("#packages-body tr[data-idx]");
+  rows.forEach((row) => {
+    const idx = parseInt(row.dataset.idx, 10);
+    const p = packagesState.packages[idx];
+    if (!p) return;
+    const disc = p.data_gb === 0 ? "—" : (calcDiscount(p.data_gb) * 100).toFixed(1) + "%";
+    row.cells[2].textContent = disc;
+    const priceCell = row.cells[3];
+    if (p.data_gb === 0) return; // manual price, keep input
+    const price = calcPrice(base, p.data_gb);
+    priceCell.innerHTML = `<span>${fmtAmount(price)}</span> <span class="muted small">[${disc} off]</span>`;
+  });
 });
 
 $("#pkg-save")?.addEventListener("click", async () => {
