@@ -365,6 +365,10 @@ deploy_source() {
     fi
 
     chown -R "$CURRENT_USER:$CURRENT_GROUP" "$INSTALL_DIR"
+    # B2 fix: ensure DB and settings are 600 (not 644) and dir is 750
+    find "$INSTALL_DIR" -maxdepth 1 -type f \( -name "*.db" -o -name "*.sqlite3" -o -name "*.sqlite" -o -name "admin_settings.json" \) -exec chmod 600 {} \; 2>/dev/null || true
+    find "$INSTALL_DIR" -maxdepth 1 -type f \( -name "*.db-wal" -o -name "*.db-shm" \) -exec chmod 600 {} \; 2>/dev/null || true
+    chmod 750 "$INSTALL_DIR" 2>/dev/null || true
     log "Source deployed to $INSTALL_DIR"
 }
 

@@ -27,6 +27,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• برای تهیه اشتراک، گزینه <b>🛒 خرید اشتراک</b> را انتخاب کنید.\n"
         "• پس از پرداخت از طریق درگاه زرین‌پال، اشتراک شما به‌صورت خودکار فعال و کانفیگ آن تحویل داده می‌شود.\n"
         "• اشتراک‌ها و کانفیگ‌های فعال خود را در بخش <b>👤 پروفایل من</b> مشاهده کنید.\n\n"
-        "📩 پشتیبانی: @VardenProxySupport"
+        "📩 پشتیبانی: https://t.me/vardenERR"
     )
     await update.message.reply_text(text, reply_markup=main_menu_keyboard(), parse_mode="HTML")

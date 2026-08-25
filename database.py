@@ -27,6 +27,27 @@ async def init_db():
         except Exception:
             log.warning("Migration failed; continuing", exc_info=True)
 
+    # B2 fix: ensure sqlite file is 600
+    if config.database_url.startswith("sqlite"):
+        try:
+            import os
+
+            db_path = config.database_url.split(":///")[-1].split("?")[0]
+            # Handle relative path (relative to cwd or INSTALL_DIR)
+            if db_path and not db_path.startswith(":memory:"):
+                if os.path.exists(db_path):
+                    os.chmod(db_path, 0o600)
+                # also wal/shm if exist
+                for suffix in ("-wal", "-shm"):
+                    p = db_path + suffix
+                    if os.path.exists(p):
+                        try:
+                            os.chmod(p, 0o600)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
 
 async def dispose_engine():
     await engine.dispose()
