@@ -14,10 +14,10 @@ from sqlalchemy.orm import selectinload
 from config import config
 from database import async_session
 from keyboards import main_menu_keyboard
-from handlers.buy import OrderAlreadyApproved, verify_and_fulfill_order
+from handlers.buy import OrderAlreadyApproved, OrderNotApprovable, verify_and_fulfill_order
 from models import Order
 from vpn_service import VPNPanelError
-from zarinpal import ZarinpalError, verify_payment
+from zarinpal import ZarinpalError, reverse_payment, verify_payment
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +37,52 @@ def _page(title: str, body: str) -> web.Response:
     return web.Response(
         text=_PAGE.format(title=escape(title), body=escape(body)),
         content_type="text/html",
+    )
+
+
+async def _paid_cancelled_flow(application, session, order, authority, outcome) -> web.Response:
+    """A payment succeeded for a cancelled/rejected order — auto-refund it.
+
+    Uses Zarinpal's Reverse API (works fee-free within 30 minutes of the
+    payment, provided the store's server IP is whitelisted in the terminal
+    settings). Falls back to admin escalation when reversal isn't possible.
+    """
+    oid = order.id
+    try:
+        await reverse_payment(authority)
+    except ZarinpalError as exc:
+        log.error(
+            "Order #%s was CANCELLED but payment succeeded (ref %s) and "
+            "auto-refund failed: %s", oid, outcome["ref_id"], exc,
+        )
+        await _notify_admins(
+            application,
+            f"⚠️ <b>Paid cancelled order!</b> Order #{oid} (ref "
+            f"<code>{outcome['ref_id']}</code>) was cancelled by the user but "
+            f"the payment went through and could not be auto-reversed: {exc}. "
+            "Refund or fulfill manually.",
+        )
+        await _notify(application, order.user.telegram_id,
+                      f"ℹ️ Order #{oid} had been cancelled, but its payment arrived. "
+                      "Our support team will contact you shortly.")
+        return _page(
+            "نیاز به بررسی",
+            "سفارش قبلاً لغو شده اما پرداخت انجام شده است؛ تیم پشتیبانی با شما تماس می‌گیرد.",
+        )
+
+    log.info("Order #%s was paid after cancellation; auto-reversed (ref %s)",
+             oid, outcome["ref_id"])
+    await _notify_admins(
+        application,
+        f"ℹ️ Cancelled order #{oid} was paid anyway — payment auto-reversed "
+        f"(ref <code>{outcome['ref_id']}</code>).",
+    )
+    await _notify(application, order.user.telegram_id,
+                  f"💳 Order #{oid} had been cancelled, so its payment was "
+                  "automatically reversed to your card.")
+    return _page(
+        "مبلغ مستردد شد ✅",
+        "سفارش لغو شده بود؛ مبلغ پرداختی به‌صورت خودکار به کارت شما بازگشت داده شد.",
     )
 
 
@@ -69,7 +115,7 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
         if order.status != "pending":
             # Cancelled/rejected before the money landed. The StartPay link
             # itself can't be revoked, so check whether the user paid anyway
-            # and escalate to support when they did.
+            # and auto-refund via the Reverse API when they did.
             try:
                 outcome = await verify_payment(order.payment_authority, order.amount_toomans)
             except ZarinpalError:
@@ -77,24 +123,7 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
                     "سفارش لغو شده",
                     "این سفارش لغو شده و وجهی بابت آن پرداخت نشده است. در صورت نیاز دوباره خرید کنید.",
                 )
-            log.error(
-                "Order #%s was CANCELLED but payment succeeded (ref %s) — needs refund/handling!",
-                oid, outcome["ref_id"],
-            )
-            await _notify_admins(
-                application,
-                f"⚠️ <b>Paid cancelled order!</b> Order #{oid} (authority "
-                f"<code>{escape(authority)}</code>, ref <code>{outcome['ref_id']}</code>) "
-                "was cancelled by the user but the payment went through. "
-                "Refund or fulfill manually.",
-            )
-            await _notify(application, chat_id,
-                          f"ℹ️ Order #{oid} had been cancelled, but its payment arrived. "
-                          "Our support team will contact you shortly.")
-            return _page(
-                "نیاز به بررسی",
-                "سفارش قبلاً لغو شده اما پرداخت انجام شده است؛ تیم پشتیبانی با شما تماس می‌گیرد.",
-            )
+            return await _paid_cancelled_flow(application, session, order, authority, outcome)
 
         try:
             outcome = await verify_and_fulfill_order(session, order)
@@ -109,6 +138,17 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
             return _page("در حال بررسی", "پرداخت شما ثبت شد؛ فعال‌سازی چند دقیقه طول خواهد کشید.")
         except OrderAlreadyApproved:
             return _page("قبلاً تأیید شده", "این سفارش قبلاً تأیید و فعال شده است. به ربات برگردید. ✅")
+        except OrderNotApprovable:
+            # Order was cancelled while we were verifying — money may have
+            # moved; verify explicitly and auto-refund.
+            try:
+                outcome = await verify_payment(order.payment_authority, order.amount_toomans)
+            except ZarinpalError:
+                return _page(
+                    "سفارش لغو شده",
+                    "این سفارش لغو شده و وجهی بابت آن پرداخت نشده است. در صورت نیاز دوباره خرید کنید.",
+                )
+            return await _paid_cancelled_flow(application, session, order, authority, outcome)
 
     ref = outcome["ref_id"]
     await _notify(

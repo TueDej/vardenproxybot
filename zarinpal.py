@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 
 REQUEST_PATH = "/pg/v4/payment/request.json"
 VERIFY_PATH = "/pg/v4/payment/verify.json"
+REVERSE_PATH = "/pg/v4/payment/reverse.json"
 
 # Gateway codes that indicate a successful transaction.
 VERIFIED_NEW = 100
@@ -39,7 +40,10 @@ def _error_detail(data: Any, status_code: int, path: str) -> str:
             elif err:
                 msgs.append(str(err))
     elif isinstance(errors, dict):
-        msgs.append(str(errors.get("message") or errors.get("code") or errors))
+        if errors.get("message") and errors.get("code"):
+            msgs.append(f"{errors['message']} (code {errors['code']})")
+        else:
+            msgs.append(str(errors.get("message") or errors.get("code") or errors))
     if not msgs and isinstance(data, dict) and isinstance(data.get("data"), dict):
         inner = data["data"]
         code = inner.get("code")
@@ -119,3 +123,21 @@ async def verify_payment(authority: str, amount_toomans: int) -> dict:
         "ref_id": inner.get("ref_id"),
         "card_pan": inner.get("card_pan"),
     }
+
+
+async def reverse_payment(authority: str) -> dict:
+    """Reverse (auto-refund) a successful transaction.
+
+    Only works within 30 minutes of the payment and requires the store's
+    server IP to be whitelisted in the Zarinpal terminal settings (-62).
+    Returns {"refunded": True} on success; raises ZarinpalError otherwise.
+    """
+    payload = {
+        "merchant_id": config.zarinpal_access_token,
+        "authority": authority,
+    }
+    data = await _post(REVERSE_PATH, payload)
+    inner = data.get("data") if isinstance(data.get("data"), dict) else {}
+    if inner.get("code") != VERIFIED_NEW or data.get("errors"):
+        raise ZarinpalError(_error_detail(data, 200, REVERSE_PATH))
+    return {"refunded": True}

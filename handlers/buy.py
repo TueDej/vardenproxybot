@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from config import config
@@ -173,7 +174,10 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pay_keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("💳 پرداخت با زرین‌پال", url=pay["startpay_url"])]]
     )
-    await update.message.reply_text(gateway_text, reply_markup=pay_keyboard, parse_mode="HTML")
+    sent = await update.message.reply_text(
+        gateway_text, reply_markup=pay_keyboard, parse_mode="HTML"
+    )
+    context.user_data["pay_message_id"] = sent.message_id
     await update.message.reply_text(
         "⏳ Waiting for your payment — we detect it automatically.\n"
         "You can cancel the order meanwhile:",
@@ -194,6 +198,19 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if order and order.status == "pending":
             order.status = "cancelled"
             await session.commit()
+
+    # Best-effort: kill the Zarinpal pay button in chat so the cancelled
+    # order can't be paid from a still-visible link.
+    pay_message_id = context.user_data.pop("pay_message_id", None)
+    if pay_message_id:
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=update.effective_chat.id,
+                message_id=pay_message_id,
+                reply_markup=None,
+            )
+        except TelegramError as exc:
+            log.info("Could not strip pay button for order #%s: %s", order_id, exc)
 
     context.user_data.pop("order_id", None)
     await update.message.reply_text(
