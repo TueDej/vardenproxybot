@@ -1,7 +1,8 @@
 import logging
 from html import escape
 
-from sqlalchemy import select, update
+from sqlalchemy import select
+from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -72,7 +73,7 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await get_or_create_user(session, update.effective_user)
         # Supersede earlier pending orders so they can't stack up.
         await session.execute(
-            update(Order)
+            sa_update(Order)
             .where(Order.user_id == user.id, Order.status == "pending")
             .values(status="cancelled")
         )
@@ -194,7 +195,7 @@ async def approve_order(session, order: Order) -> dict:
     # and reading them afterwards would trigger an illegal sync lazy-load.
     order_id = order.id
     claim = await session.execute(
-        update(Order)
+        sa_update(Order)
         .where(Order.id == order_id, Order.status != "approved")
         .values(status="approved")
     )
@@ -204,7 +205,7 @@ async def approve_order(session, order: Order) -> dict:
     order.status = "approved"
 
     async def _set(**values):
-        await session.execute(update(Order).where(Order.id == order_id).values(**values))
+        await session.execute(sa_update(Order).where(Order.id == order_id).values(**values))
         await session.commit()
 
     try:
@@ -242,7 +243,7 @@ async def approve_order(session, order: Order) -> dict:
     except VPNPanelError:
         await session.rollback()
         await session.execute(
-            update(Order)
+            sa_update(Order)
             .where(Order.id == order_id, Order.status == "approved")
             .values(status="pending")
         )
