@@ -4,8 +4,7 @@ from html import escape
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import selectinload
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
@@ -15,6 +14,7 @@ from keyboards import (
     cancel_keyboard,
     home_keyboard,
     packages_keyboard,
+    payment_keyboard,
 )
 from models import Order, User
 from packages import DURATION_DAYS
@@ -152,59 +152,48 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["order_id"] = order.id
 
-    # Admin free purchase — provision immediately, no payment required.
-    if is_admin:
-        async with async_session() as session:
-            result = await session.execute(
-                select(Order).where(Order.id == order.id).options(selectinload(Order.user))
+    # Build the payment prompt. Non-admins must pay via Zarinpal; admins always
+    # get a free-confirm button (see payment_keyboard) and may also pay normally.
+    public_url = None
+    if not is_admin:
+        try:
+            pay = await request_payment(
+                order.id, pkg["price"], f"VardenProxy subscription — {pkg['label']} (order #{order.id})"
             )
-            order_db = result.scalar_one()
-            try:
-                panel = await approve_order(session, order_db)
-            except VPNPanelError as exc:
-                log.warning("Admin free purchase failed for order #%s: %s", order.id, exc)
-                await update.message.reply_text(
-                    "❌ خطای سرور — ایجاد اشتراک رایگان انجام نشد.\n"
-                    f"<code>{escape(str(exc))}</code>",
-                    parse_mode="HTML",
+        except ZarinpalError as exc:
+            log.warning("Payment request for order #%s failed: %s", order.id, exc)
+            async with async_session() as session:
+                await session.execute(
+                    sa_update(Order).where(Order.id == order.id).values(status="cancelled")
                 )
-                return
-        context.user_data.pop("order_id", None)
-        config_block = format_vpn_config(panel["links"])
-        await update.message.reply_text(
-            f"✅ <b>اشتراک رایگان (ادمین)</b> ایجاد شد.\n\n"
-            f"📦 پکیج: {escape(pkg['label'])}\n"
-            f"⏳ مدت: {DURATION_DAYS} روز\n\n"
-            f"{config_block}",
-            parse_mode="HTML",
-        )
-        return
-
-    # Real gateway flow: create a payment session and hand the user the link.
-    try:
-        pay = await request_payment(
-            order.id, pkg["price"], f"VardenProxy subscription — {pkg['label']} (order #{order.id})"
-        )
-    except ZarinpalError as exc:
-        log.warning("Payment request for order #%s failed: %s", order.id, exc)
+                await session.commit()
+            context.user_data.pop("order_id", None)
+            await update.message.reply_text(
+                "❌ <b>خطا در ایجاد پرداخت</b>\nلطفاً چند دقیقه بعد دوباره تلاش کنید.",
+                parse_mode="HTML",
+            )
+            return
         async with async_session() as session:
             await session.execute(
-                sa_update(Order).where(Order.id == order.id).values(status="cancelled")
+                sa_update(Order).where(Order.id == order.id).values(payment_authority=pay["authority"])
             )
             await session.commit()
-        context.user_data.pop("order_id", None)
-        # Do not leak gateway internals to the user; log detailed error server-side.
-        await update.message.reply_text(
-            "❌ <b>خطا در ایجاد پرداخت</b>\nلطفاً چند دقیقه بعد دوباره تلاش کنید.",
-            parse_mode="HTML",
-        )
-        return
-
-    async with async_session() as session:
-        await session.execute(
-            sa_update(Order).where(Order.id == order.id).values(payment_authority=pay["authority"])
-        )
-        await session.commit()
+        public_url = config.zarinpal_public_start_url(pay["authority"])
+    else:
+        # Admin: try Zarinpal too, but never block on its failure — the
+        # free-confirm button is always offered so they can provision for free.
+        try:
+            pay = await request_payment(
+                order.id, pkg["price"], f"VardenProxy subscription — {pkg['label']} (order #{order.id})"
+            )
+            async with async_session() as session:
+                await session.execute(
+                    sa_update(Order).where(Order.id == order.id).values(payment_authority=pay["authority"])
+                )
+                await session.commit()
+            public_url = config.zarinpal_public_start_url(pay["authority"])
+        except ZarinpalError as exc:
+            log.warning("Admin payment request for order #%s failed (offering free): %s", order.id, exc)
 
     separator = "─" * 20
     gateway_text = (
@@ -216,11 +205,9 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "برای پرداخت امن، روی دکمه زیر بزنید و پرداخت را در <b>درگاه زرین‌پال</b> انجام دهید.\n"
         "✅ بلافاصله پس از پرداخت، اشتراک شما به‌صورت خودکار فعال می‌شود."
     )
-    # Use website intermediate URL so Referer to Zarinpal is our domain (bypasses checkout.toodej.shop)
-    public_url = config.zarinpal_public_start_url(pay["authority"])
-    pay_keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("💳 پرداخت با زرین‌پال", url=public_url)]]
-    )
+    if is_admin:
+        gateway_text += "\n\n🔧 <i>ادمین:</i> می‌توانید بدون پرداخت، اشتراک را به‌صورت رایگان تأیید کنید."
+    pay_keyboard = payment_keyboard(public_url, order.id, is_admin)
     sent = await update.message.reply_text(
         gateway_text, reply_markup=pay_keyboard, parse_mode="HTML"
     )

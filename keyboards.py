@@ -1,4 +1,4 @@
-from telegram import ReplyKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 
 import packages as _pkg_mod
 
@@ -43,3 +43,21 @@ def cancel_keyboard():
 
 def home_keyboard():
     return ReplyKeyboardMarkup([_HOME_ROW.copy()], resize_keyboard=True)
+
+
+def payment_keyboard(public_url: str | None, order_id: int, is_admin: bool) -> InlineKeyboardMarkup:
+    """Build the payment prompt buttons.
+
+    Non-admins get only the ZarinPal pay button. Admins always get a
+    free-confirm button too (so they can provision without paying), plus the
+    ZarinPal button when a payment URL is available. Use this in every payment
+    prompt (new purchase, renewal, ...) for a single extensible entry point.
+    """
+    buttons: list[list[InlineKeyboardButton]] = []
+    if public_url:
+        buttons.append([InlineKeyboardButton("💳 پرداخت با زرین‌پال", url=public_url)])
+    if is_admin:
+        buttons.append(
+            [InlineKeyboardButton("✅ تایید رایگان (ادمین)", callback_data=f"free|{order_id}")]
+        )
+    return InlineKeyboardMarkup(buttons)

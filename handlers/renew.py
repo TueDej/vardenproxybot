@@ -3,13 +3,13 @@ from html import escape
 
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
 from handlers.buy import get_or_create_user, purchase_blocked_reason
-from keyboards import cancel_keyboard
+from keyboards import cancel_keyboard, payment_keyboard
 from models import Order
 from packages import DURATION_DAYS, load_packages
 from vpn_service import VPNPanelError, VPNPanelService
@@ -106,45 +106,63 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["order_id"] = order.id
 
-    try:
-        pay = await request_payment(
-            order.id, amount, f"VardenProxy renewal — {package_label} (order #{order.id})"
-        )
-    except ZarinpalError as exc:
-        log.warning("Renewal payment request for order #%s failed: %s", order.id, exc)
+    # Build the payment prompt. Non-admins must pay via Zarinpal; admins always
+    # get a free-confirm button (see payment_keyboard) and may also pay normally.
+    is_admin = user.id in config.admin_ids
+    public_url = None
+    if not is_admin:
+        try:
+            pay = await request_payment(
+                order.id, amount, f"VardenProxy renewal — {package_label} (order #{order.id})"
+            )
+        except ZarinpalError as exc:
+            log.warning("Renewal payment request for order #%s failed: %s", order.id, exc)
+            async with async_session() as session:
+                await session.execute(
+                    sa_update(Order).where(Order.id == order.id).values(status="cancelled")
+                )
+                await session.commit()
+            context.user_data.pop("order_id", None)
+            await query.message.reply_text(
+                "❌ <b>خطا در ایجاد پرداخت</b>\nلطفاً چند دقیقه بعد دوباره تلاش کنید.",
+                parse_mode="HTML",
+            )
+            return
         async with async_session() as session:
             await session.execute(
-                sa_update(Order).where(Order.id == order.id).values(status="cancelled")
+                sa_update(Order).where(Order.id == order.id).values(payment_authority=pay["authority"])
             )
             await session.commit()
-        context.user_data.pop("order_id", None)
-        await query.message.reply_text(
-            "❌ <b>خطا در ایجاد پرداخت</b>\nلطفاً چند دقیقه بعد دوباره تلاش کنید.",
-            parse_mode="HTML",
-        )
-        return
-
-    async with async_session() as session:
-        await session.execute(
-            sa_update(Order).where(Order.id == order.id).values(payment_authority=pay["authority"])
-        )
-        await session.commit()
+        public_url = config.zarinpal_public_start_url(pay["authority"])
+    else:
+        # Admin: try Zarinpal too, but never block on its failure — the
+        # free-confirm button is always offered so they can renew for free.
+        try:
+            pay = await request_payment(
+                order.id, amount, f"VardenProxy renewal — {package_label} (order #{order.id})"
+            )
+            async with async_session() as session:
+                await session.execute(
+                    sa_update(Order).where(Order.id == order.id).values(payment_authority=pay["authority"])
+                )
+                await session.commit()
+            public_url = config.zarinpal_public_start_url(pay["authority"])
+        except ZarinpalError as exc:
+            log.warning("Admin renewal payment request failed (offering free): %s", exc)
 
     separator = "─" * 20
-    public_url = config.zarinpal_public_start_url(pay["authority"])
-    pay_keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("💳 پرداخت با زرین‌پال", url=public_url)]]
-    )
-    await query.message.reply_text(
+    renew_text = (
         f"💳 <b>تمدید اشتراک</b>\n\n"
         f"📦 پکیج: {escape(package_label)}\n"
         f"⏳ مدت: {duration_days} روز\n"
         f"💰 مبلغ: <b>{amount:,} تومان</b>\n\n"
         f"{separator}\n"
-        "پس از پرداخت، زمان اشتراک فعلی شما تمدید می‌شود (همان کانفیگ قبلی).",
-        reply_markup=pay_keyboard,
-        parse_mode="HTML",
+        "پس از پرداخت، زمان اشتراک فعلی شما تمدید می‌شود (همان کانفیگ قبلی)."
     )
+    if is_admin:
+        renew_text += "\n\n🔧 <i>ادمین:</i> می‌توانید بدون پرداخت، تمدید را به‌صورت رایگان تأیید کنید."
+    pay_keyboard = payment_keyboard(public_url, order.id, is_admin)
+    await query.message.reply_text(renew_text, reply_markup=pay_keyboard, parse_mode="HTML")
     await query.message.reply_text(
         "⏳ در انتظار پرداخت شما هستیم؛ پرداخت به‌صورت خودکار تشخیص داده می‌شود.",
         reply_markup=cancel_keyboard(),

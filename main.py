@@ -26,6 +26,7 @@ from handlers.buy import (
     cancel_order,
     package_selected,
 )
+from handlers.free import free_confirm_callback
 from handlers.profile import profile
 from handlers.renew import renew_callback
 from handlers.start import help_command, start
@@ -182,8 +183,9 @@ def main():
     app.add_handler(CommandHandler("pending", pending))
     app.add_handler(CommandHandler("stats", stats))
 
-    # Inline button callbacks (e.g. renew subscription)
+    # Inline button callbacks (e.g. renew subscription, admin free confirm)
     app.add_handler(CallbackQueryHandler(renew_callback, pattern=r"^renew\|"))
+    app.add_handler(CallbackQueryHandler(free_confirm_callback, pattern=r"^free\|"))
 
     # Text messages (reply keyboard)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))
