@@ -284,6 +284,10 @@ class VPNPanelService:
         client = await cls.get_client(email)
         if not client:
             raise VPNPanelError(f"Client {email} not found for renewal.")
+        # The get-by-email response may wrap the client under a "client" key;
+        # read fields from the unwrapped object.
+        if isinstance(client.get("client"), dict):
+            client = client["client"]
         now_ms = int(datetime.now(UTC).timestamp() * 1000)
         existing_expiry = int(client.get("expiryTime", 0) or 0)
         if existing_expiry > now_ms:
@@ -291,6 +295,9 @@ class VPNPanelService:
         else:
             # Expired: shift so the new expiry lands at now + duration_days.
             add_days = int(duration_days + max(1, ceil((now_ms - existing_expiry) / 86400000)))
+        # Safety clamp: never extend by an absurd amount (guards against
+        # mis-parsed expiry values from the panel).
+        add_days = min(add_days, 3650)
         payload: dict = {"emails": [email], "addDays": add_days}
         if data_gb and data_gb > 0:
             payload["addBytes"] = data_gb * 1024**3
