@@ -183,8 +183,10 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "برای پرداخت امن، روی دکمه زیر بزنید و پرداخت را در <b>درگاه زرین‌پال</b> انجام دهید.\n"
         "✅ بلافاصله پس از پرداخت، اشتراک شما به‌صورت خودکار فعال می‌شود."
     )
+    # Use website intermediate URL so Referer to Zarinpal is our domain (bypasses checkout.toodej.shop)
+    public_url = config.zarinpal_public_start_url(pay["authority"])
     pay_keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("💳 پرداخت با زرین‌پال", url=pay["startpay_url"])]]
+        [[InlineKeyboardButton("💳 پرداخت با زرین‌پال", url=public_url)]]
     )
     sent = await update.message.reply_text(
         gateway_text, reply_markup=pay_keyboard, parse_mode="HTML"

@@ -138,7 +138,7 @@ class Config:
         return "https://payment.zarinpal.com"
 
     def zarinpal_startpay_url(self, authority: str) -> str:
-        """Build the URL the user must be sent to to pay.
+        """Build the direct Zarinpal gateway URL (for server-side redirect).
 
         Uses ZarinGate to bypass the intermediate checkout page that shows
         merchant details (e.g. checkout.toodej.shop). In sandbox mode
@@ -151,6 +151,34 @@ class Config:
         if self.zarinpal_zaringate:
             return f"{base}/pg/StartPay/{authority}/ZarinGate"
         return f"{base}/pg/StartPay/{authority}"
+
+    def zarinpal_public_start_url(self, authority: str) -> str:
+        """Public URL on *our* website that then redirects to Zarinpal.
+
+        Clicking the Telegram button goes to our domain first (e.g.
+        https://pay.example.com/zarinpal/start/{authority}), so the
+        Referer to Zarinpal is our website, not t.me — this makes Zarinpal
+        treat it as a website checkout and skip the intermediate
+        checkout.toodej.shop owner-details page.
+        Falls back to direct Zarinpal URL if callback not configured.
+        """
+        authority = (authority or "").strip()
+        if not authority:
+            return self.zarinpal_startpay_url(authority)
+        if not self.zarinpal_callback_url:
+            return self.zarinpal_startpay_url(authority)
+        # Derive public base from callback URL: https://host/zarinpal/callback -> https://host
+        try:
+            base = urlsplit(self.zarinpal_callback_url)
+            public_base = f"{base.scheme}://{base.netloc}"
+            # Keep same prefix as callback (/zarinpal) if present
+            # e.g. /zarinpal/callback -> /zarinpal/start/{authority}
+            path_prefix = base.path.rsplit("/", 1)[0] if "/" in base.path else ""
+            if path_prefix:
+                return f"{public_base}{path_prefix}/start/{authority}"
+            return f"{public_base}/zarinpal/start/{authority}"
+        except Exception:
+            return self.zarinpal_startpay_url(authority)
 
     @property
     def proxy_url(self) -> str | None:

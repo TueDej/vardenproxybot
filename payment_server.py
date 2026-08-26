@@ -12,8 +12,9 @@ import pathlib
 try:
     from datetime import UTC
 except ImportError:  # Python <3.11
+    from datetime import timezone
 
-    UTC = UTC  # type: ignore[no-redef]
+    UTC = timezone.utc  # type: ignore[no-redef]  # noqa: UP017
 from datetime import datetime
 from html import escape
 
@@ -601,6 +602,43 @@ async def _notify_admins(application, text: str) -> None:
             log.warning("Could not alert admin %s", admin_id, exc_info=True)
 
 
+async def handle_zarinpal_start(request: web.Request) -> web.Response:
+    """Intermediate website page that then redirects to Zarinpal.
+
+    Telegram buttons now point here (https://pay.example.com/zarinpal/start/{authority})
+    so the Referer to Zarinpal is our website, not t.me — this lets Zarinpal
+    treat it as a website checkout and skip the checkout.toodej.shop owner-details
+    interstitial. We serve a small HTML with meta-refresh + JS redirect, falling
+    back to a manual link.
+    """
+    authority = (request.match_info.get("authority") or "").strip()
+    # Validate like callback
+    if not authority or len(authority) > 64 or not authority.replace("_", "").replace("-", "").isalnum():
+        return _page("پرداخت نامعتبر", "شناسه پرداخت نامعتبر است.")
+    # Optional: verify order exists and is pending to avoid open-redirect abuse
+    async with async_session() as session:
+        result = await session.execute(select(Order).where(Order.payment_authority == authority))
+        order = result.scalar_one_or_none()
+        if order is None:
+            log.warning("Start page for unknown authority (len=%d)", len(authority))
+            return _page("سفارش یافت نشد", "سفارشی برای این پرداخت پیدا نشد.")
+        if order.status != "pending":
+            if order.status == "approved":
+                return _page("قبلاً پرداخت شده", "این سفارش قبلاً پرداخت و فعال شده است.")
+            return _page("سفارش نامعتبر", f"وضعیت سفارش: {escape(order.status)}")
+    # Build direct Zarinpal URL (with ZarinGate if enabled)
+    target = config.zarinpal_startpay_url(authority)
+    # Small HTML that auto-redirects — Referer will be this page (our website)
+    html = f"""<!DOCTYPE html><html lang="fa"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0; url={escape(target)}">
+<title>انتقال به درگاه پرداخت</title>
+<style>body{{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}} .box{{text-align:center;padding:2rem}} .spinner{{width:36px;height:36px;border:3px solid #334155;border-top-color:#38bdf8;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}} @keyframes spin{{to{{transform:rotate(360deg)}}}} a{{color:#38bdf8}}</style>
+<script>window.location.replace("{escape(target)}");</script>
+</head><body><div class="box"><div class="spinner"></div><h1>در حال انتقال به درگاه پرداخت</h1><p>لطفاً چند لحظه صبر کنید…</p><p><a href="{escape(target)}">اگر منتقل نشدید، اینجا کلیک کنید</a></p></div></body></html>"""
+    return web.Response(text=html, content_type="text/html")
+
+
 async def handle_health(request: web.Request) -> web.Response:
     return web.Response(text="ok")
 
@@ -609,6 +647,7 @@ def build_app(application) -> web.Application:
     app = web.Application(middlewares=[admin_auth_middleware])
     app["ptb_application"] = application
     app.router.add_get(CALLBACK_PATH, handle_zarinpal_callback)
+    app.router.add_get("/zarinpal/start/{authority}", handle_zarinpal_start)
     app.router.add_get("/healthz", handle_health)
     # Admin panel (protected by BasicAuth middleware)
     app.router.add_get(ADMIN_PREFIX, handle_admin_index)

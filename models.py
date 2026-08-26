@@ -1,8 +1,9 @@
 try:
     from datetime import UTC
 except ImportError:  # Python <3.11
+    from datetime import timezone
 
-    UTC = UTC  # type: ignore[no-redef]
+    UTC = timezone.utc  # type: ignore[no-redef]  # noqa: UP017
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
