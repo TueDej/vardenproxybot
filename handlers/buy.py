@@ -4,6 +4,7 @@ from html import escape
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
@@ -101,10 +102,12 @@ async def get_or_create_user(session, telegram_user) -> User:
 
 
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    blocked = purchase_blocked_reason(update.effective_user.id)
-    if blocked:
-        await update.message.reply_text(blocked, parse_mode="HTML")
-        return
+    is_admin = update.effective_user.id in config.admin_ids
+    if not is_admin:
+        blocked = purchase_blocked_reason(update.effective_user.id)
+        if blocked:
+            await update.message.reply_text(blocked, parse_mode="HTML")
+            return
     context.user_data.clear()
     await update.message.reply_text(
         "🛒 <b>انتخاب پکیج</b>\n\nتمام اشتراک‌ها یک‌ماهه هستند:",
@@ -120,10 +123,12 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید.")
         return
 
-    blocked = purchase_blocked_reason(update.effective_user.id)
-    if blocked:
-        await update.message.reply_text(blocked, parse_mode="HTML")
-        return
+    is_admin = update.effective_user.id in config.admin_ids
+    if not is_admin:
+        blocked = purchase_blocked_reason(update.effective_user.id)
+        if blocked:
+            await update.message.reply_text(blocked, parse_mode="HTML")
+            return
 
     async with async_session() as session:
         user = await get_or_create_user(session, update.effective_user)
@@ -146,6 +151,34 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await session.refresh(order)
 
     context.user_data["order_id"] = order.id
+
+    # Admin free purchase — provision immediately, no payment required.
+    if is_admin:
+        async with async_session() as session:
+            result = await session.execute(
+                select(Order).where(Order.id == order.id).options(selectinload(Order.user))
+            )
+            order_db = result.scalar_one()
+            try:
+                panel = await approve_order(session, order_db)
+            except VPNPanelError as exc:
+                log.warning("Admin free purchase failed for order #%s: %s", order.id, exc)
+                await update.message.reply_text(
+                    "❌ خطای سرور — ایجاد اشتراک رایگان انجام نشد.\n"
+                    f"<code>{escape(str(exc))}</code>",
+                    parse_mode="HTML",
+                )
+                return
+        context.user_data.pop("order_id", None)
+        config_block = format_vpn_config(panel["links"])
+        await update.message.reply_text(
+            f"✅ <b>اشتراک رایگان (ادمین)</b> ایجاد شد.\n\n"
+            f"📦 پکیج: {escape(pkg['label'])}\n"
+            f"⏳ مدت: {DURATION_DAYS} روز\n\n"
+            f"{config_block}",
+            parse_mode="HTML",
+        )
+        return
 
     # Real gateway flow: create a payment session and hand the user the link.
     try:
