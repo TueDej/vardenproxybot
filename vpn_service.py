@@ -295,6 +295,11 @@ class VPNPanelService:
         if not client.get("email") and isinstance(client.get("client"), dict):
             client = client["client"]
         client["email"] = email
+        # The panel's update model types `id` as a string, but the GET response
+        # returns it as a number — sending it back verbatim makes Go's JSON
+        # unmarshal fail. Coerce to str so the update succeeds.
+        if client.get("id") is not None:
+            client["id"] = str(client["id"])
         now_ms = int(datetime.now(UTC).timestamp() * 1000)
         existing_expiry = int(client.get("expiryTime", 0) or 0)
         if data_gb and data_gb > 0:
