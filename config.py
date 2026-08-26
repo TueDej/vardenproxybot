@@ -129,11 +129,11 @@ class Config:
 
     @property
     def zarinpal_gateway_base_url(self) -> str:
-        # Canonical StartPay host — www.zarinpal.com (payment.zarinpal.com also works)
-        # ZarinGate suffix (/ZarinGate) bypasses the checkout page.
+        # Mirrors toodej: https://zarinpal.com/pg/StartPay/ (naked domain)
+        # ZarinGate suffix (/ZarinGate) bypasses the checkout page when enabled.
         if self.zarinpal_sandbox:
             return "https://sandbox.zarinpal.com"
-        return "https://www.zarinpal.com"
+        return "https://zarinpal.com"
 
     def zarinpal_startpay_url(self, authority: str) -> str:
         """Build the URL the user must be sent to to pay.

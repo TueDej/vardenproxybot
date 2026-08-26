@@ -23,7 +23,16 @@ REVERSE_PATH = "/pg/v4/payment/reverse.json"
 VERIFIED_NEW = 100
 VERIFIED_ALREADY = 101
 
+# Rial per toman — toodej stores toman, Zarinpal v4 expects rial (like toodej)
+RIAL_PER_TOMAN = 10
+
 _TIMEOUT = httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=10.0)
+
+
+def _toman_to_rial(amount_toman: int) -> int:
+    if amount_toman < 0:
+        raise ZarinpalError(f"negative amount: {amount_toman}")
+    return amount_toman * RIAL_PER_TOMAN
 
 
 class ZarinpalError(Exception):
@@ -96,12 +105,14 @@ async def _post(path: str, payload: dict, retries: int = 3) -> dict:
 async def request_payment(order_id: int, amount_toomans: int, description: str) -> dict:
     """Create a payment session.
 
+    Mirrors toodej (farmstore) — amount in rial, no currency field, so the
+    same merchant does not trigger the checkout.toodej.shop custom checkout.
     Returns {"authority", "startpay_url"}; raises ZarinpalError on failure.
     """
+    amount_rial = _toman_to_rial(amount_toomans)
     payload = {
         "merchant_id": config.zarinpal_access_token,
-        "amount": amount_toomans,
-        "currency": "IRT",
+        "amount": amount_rial,
         "description": description,
         "callback_url": config.zarinpal_callback_url,
         "metadata": {"order_id": str(order_id)},
@@ -120,13 +131,14 @@ async def request_payment(order_id: int, amount_toomans: int, description: str) 
 async def verify_payment(authority: str, amount_toomans: int) -> dict:
     """Verify a transaction server-side.
 
+    Amount must match the request amount (rial, like toodej).
     Returns {"ok": True, "already_done", "ref_id", "card_pan"} on success;
     raises ZarinpalError when the payment is unverified/cancelled/failed.
     """
+    amount_rial = _toman_to_rial(amount_toomans)
     payload = {
         "merchant_id": config.zarinpal_access_token,
-        "amount": amount_toomans,
-        "currency": "IRT",
+        "amount": amount_rial,
         "authority": authority,
     }
     data = await _post(VERIFY_PATH, payload)
