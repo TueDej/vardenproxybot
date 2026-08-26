@@ -52,6 +52,7 @@ VAR_SPEC=(
     "ZARINPAL_ACCESS_TOKEN|Zarinpal Merchant UUID (blank = mock payments)||false"
     "ZARINPAL_SANDBOX|Zarinpal sandbox mode? (true/false)|false|false"
     "ZARINPAL_CALLBACK_URL|Public payment callback URL (https://pay.example/zarinpal/callback)||false"
+    "ZARINPAL_ZARINGATE|Bypass checkout page direct to bank? (true/false)|true|false"
     "ZARINPAL_BIND_HOST|Payment callback bind host|127.0.0.1|false"
     "ZARINPAL_BIND_PORT|Payment callback bind port|8099|false"
     "ADMIN_PANEL_USER|Admin panel username|admin|false"

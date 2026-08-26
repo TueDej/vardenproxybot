@@ -169,10 +169,12 @@ def main():
     else:
         log.info("Proxy: disabled")
     if config.zarinpal_access_token and config.zarinpal_callback_url:
+        _zg = "via ZarinGate (direct bank)" if config.zarinpal_zaringate and not config.zarinpal_sandbox else "via checkout"
         log.info(
-            "Payments: Zarinpal (%s) | callback %s",
+            "Payments: Zarinpal (%s) | callback %s | %s",
             "sandbox" if config.zarinpal_sandbox else "LIVE",
             config.zarinpal_callback_url,
+            _zg,
         )
     elif config.zarinpal_access_token:
         log.warning(

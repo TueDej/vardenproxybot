@@ -48,6 +48,7 @@ class Config:
     zarinpal_sandbox: bool = False
     zarinpal_bind_host: str = "127.0.0.1"
     zarinpal_bind_port: int = 8099
+    zarinpal_zaringate: bool = True  # bypass checkout page direct to bank
 
     # Admin panel (BasicAuth, served on same HTTP server)
     admin_panel_user: str = "admin"
@@ -82,6 +83,17 @@ class Config:
         self.zarinpal_sandbox = os.getenv("ZARINPAL_SANDBOX", "false").strip().lower() == "true"
         self.zarinpal_bind_host = os.getenv("ZARINPAL_BIND_HOST", self.zarinpal_bind_host)
         self.zarinpal_bind_port = _int_env("ZARINPAL_BIND_PORT", self.zarinpal_bind_port)
+        # ZarinGate — bypass Zarinpal checkout (checkout.toodej.shop) and go direct to bank
+        # Default True so existing terminals skip owner-details page without extra config.
+        _zg_raw = os.getenv("ZARINPAL_ZARINGATE")
+        if _zg_raw is None:
+            self.zarinpal_zaringate = True
+        else:
+            _zg = _zg_raw.strip().lower()
+            if not _zg:
+                self.zarinpal_zaringate = True
+            else:
+                self.zarinpal_zaringate = _zg not in ("false", "0", "no", "off", "disable", "disabled")
 
         # Admin panel
         self.admin_panel_user = os.getenv("ADMIN_PANEL_USER", self.admin_panel_user)
@@ -117,10 +129,26 @@ class Config:
 
     @property
     def zarinpal_gateway_base_url(self) -> str:
-        # Imitate toodej: https://zarinpal.com/pg/StartPay/{authority} (no ZarinGate, no payment subdomain)
+        # Canonical StartPay host — www.zarinpal.com (payment.zarinpal.com also works)
+        # ZarinGate suffix (/ZarinGate) bypasses the checkout page.
         if self.zarinpal_sandbox:
             return "https://sandbox.zarinpal.com"
-        return "https://zarinpal.com"
+        return "https://www.zarinpal.com"
+
+    def zarinpal_startpay_url(self, authority: str) -> str:
+        """Build the URL the user must be sent to to pay.
+
+        Uses ZarinGate to bypass the intermediate checkout page that shows
+        merchant details (e.g. checkout.toodej.shop). In sandbox mode
+        ZarinGate is not supported — plain StartPay is used.
+        """
+        authority = (authority or "").strip()
+        base = self.zarinpal_gateway_base_url
+        if self.zarinpal_sandbox:
+            return f"{base}/pg/StartPay/{authority}"
+        if self.zarinpal_zaringate:
+            return f"{base}/pg/StartPay/{authority}/ZarinGate"
+        return f"{base}/pg/StartPay/{authority}"
 
     @property
     def proxy_url(self) -> str | None:

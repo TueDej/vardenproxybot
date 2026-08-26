@@ -113,9 +113,7 @@ async def request_payment(order_id: int, amount_toomans: int, description: str) 
         raise ZarinpalError(_error_detail(data, 200, REQUEST_PATH))
     return {
         "authority": authority,
-        # Try to bypass custom checkout domain (checkout.toodej.shop) — add ?_check=0 as requested.
-        # Imitates toodej base (zarinpal.com) but adds query to hint direct bank.
-        "startpay_url": f"{config.zarinpal_gateway_base_url}/pg/StartPay/{authority}?_check=0",
+        "startpay_url": config.zarinpal_startpay_url(authority),
     }
 
 
