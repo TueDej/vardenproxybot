@@ -268,13 +268,13 @@ class VPNPanelService:
             return None
 
     @classmethod
-    async def update_client(cls, client: dict) -> None:
+    async def update_client(cls, client: dict, email: str | None = None) -> None:
         """Replace an existing client row. The server does NOT patch, so the
         caller must send the full payload (use get_client first)."""
-        email = client.get("email")
-        if not email:
+        target = email or client.get("email")
+        if not target:
             raise VPNPanelError("update_client requires a client with an email.")
-        await cls._request("POST", f"{CLIENTS_API}/update/{email}", client)
+        await cls._request("POST", f"{CLIENTS_API}/update/{target}", client)
 
     @classmethod
     async def extend_client(cls, email: str, duration_days: int, data_gb: int) -> dict:
@@ -288,6 +288,13 @@ class VPNPanelService:
         client = await cls.get_client(email)
         if not client:
             raise VPNPanelError(f"Client {email} not found for renewal.")
+        # Normalize: some panel versions wrap the client under a "client" key,
+        # or omit the email field when fetched by email. Flatten and restore
+        # the email so the full-payload update (which needs it in URL + body)
+        # succeeds.
+        if not client.get("email") and isinstance(client.get("client"), dict):
+            client = client["client"]
+        client["email"] = email
         now_ms = int(datetime.now(UTC).timestamp() * 1000)
         existing_expiry = int(client.get("expiryTime", 0) or 0)
         if data_gb and data_gb > 0:
@@ -300,7 +307,7 @@ class VPNPanelService:
             client["expiryTime"] = base + duration_days * 86400 * 1000
         # else: fully unlimited (never expires) — nothing to extend.
         client["enable"] = True
-        await cls.update_client(client)
+        await cls.update_client(client, email)
         # Start the new period with a clean usage counter.
         try:
             await cls._request("POST", f"{CLIENTS_API}/resetTraffic/{email}")
