@@ -7,6 +7,8 @@ set -euo pipefail
 # Paths can be overridden for testing:
 #   VARDEN_INSTALL_DIR / VARDEN_ENV_FILE / VARDEN_SERVICE_FILE
 #   VARDEN_FORCE_INTERACTIVE=1  — treat piped stdin as interactive (tests)
+#   VARDEN_REUSE_VENV=1         — reuse $INSTALL_DIR/venv if exists (skip pip, ~1s)
+#   VARDEN_SHARED_VENV=/path    — symlink a shared venv into $INSTALL_DIR/venv (instant across ephemeral INSTALL_DIRs)
 
 INSTALL_DIR="${VARDEN_INSTALL_DIR:-/opt/vardenproxybot}"
 ENV_FILE="${VARDEN_ENV_FILE:-/etc/vardenproxybot.conf}"
@@ -378,9 +380,49 @@ deploy_source() {
 install_dependencies() {
     step "Dependencies"
 
+    # Testing shortcut: share a single venv across install cycles.
+    #   VARDEN_REUSE_VENV=1         — keep $INSTALL_DIR/venv if it already exists (skip recreate)
+    #   VARDEN_SHARED_VENV=/path    — symlink / copy a shared venv into $INSTALL_DIR/venv
+    # Both avoid the ~30-60s venv+pip path when iterating on code (not for production).
+    if [[ -n "${VARDEN_SHARED_VENV:-}" ]]; then
+        if [[ -d "$VARDEN_SHARED_VENV/bin" && -x "$VARDEN_SHARED_VENV/bin/python" ]]; then
+            rm -rf "$INSTALL_DIR/venv" 2>/dev/null || true
+            # Prefer symlink (instant, shared) — fallback to copy if symlink fails
+            if ln -sfn "$VARDEN_SHARED_VENV" "$INSTALL_DIR/venv" 2>/dev/null; then
+                log "Shared venv symlinked: $VARDEN_SHARED_VENV -> $INSTALL_DIR/venv"
+            else
+                cp -a "$VARDEN_SHARED_VENV" "$INSTALL_DIR/venv" >> "$LOG_FILE" 2>&1
+                log "Shared venv copied: $VARDEN_SHARED_VENV -> $INSTALL_DIR/venv"
+            fi
+            chown -h "$CURRENT_USER:$CURRENT_GROUP" "$INSTALL_DIR/venv" 2>/dev/null || true
+            if "$INSTALL_DIR/venv/bin/python" -c "import telegram; import sqlalchemy; import aiosqlite; import aiohttp" >> "$LOG_FILE" 2>&1; then
+                log "Import check passed (shared venv)."
+                return 0
+            else
+                warn "Shared venv failed import check — falling back to fresh venv."
+            fi
+        else
+            warn "VARDEN_SHARED_VENV=$VARDEN_SHARED_VENV not a valid venv — ignoring."
+        fi
+    fi
+
+    if [[ "${VARDEN_REUSE_VENV:-}" == "1" || "${VARDEN_REUSE_VENV:-}" == "true" ]]; then
+        if [[ -d "$INSTALL_DIR/venv" && -x "$INSTALL_DIR/venv/bin/python" ]]; then
+            if "$INSTALL_DIR/venv/bin/python" -c "import telegram; import sqlalchemy; import aiosqlite; import aiohttp" >> "$LOG_FILE" 2>&1; then
+                log "Reusing existing venv at $INSTALL_DIR/venv (VARDEN_REUSE_VENV=1, 0s)"
+                return 0
+            fi
+            warn "Existing venv failed import check — recreating."
+        else
+            info "VARDEN_REUSE_VENV=1 but no venv at $INSTALL_DIR/venv — creating fresh."
+        fi
+    fi
+
     # Recreate venv cleanly to avoid stale packages (backup DB already done)
-    if [[ -d "$INSTALL_DIR/venv" ]]; then
+    if [[ -d "$INSTALL_DIR/venv" && ! -L "$INSTALL_DIR/venv" ]]; then
         rm -rf "$INSTALL_DIR/venv" 2>/dev/null || true
+    elif [[ -L "$INSTALL_DIR/venv" ]]; then
+        rm -f "$INSTALL_DIR/venv" 2>/dev/null || true
     fi
     python3 -m venv "$INSTALL_DIR/venv" >> "$LOG_FILE" 2>&1
     chown -R "$CURRENT_USER:$CURRENT_GROUP" "$INSTALL_DIR/venv"
@@ -401,6 +443,14 @@ install_dependencies() {
     else
         err "Package verification failed. See $LOG_FILE"
         exit 1
+    fi
+
+    # If shared-venv mode, populate the shared location for next runs
+    if [[ -n "${VARDEN_SHARED_VENV:-}" && ! -e "$VARDEN_SHARED_VENV" ]]; then
+        mkdir -p "$(dirname "$VARDEN_SHARED_VENV")" 2>/dev/null || true
+        cp -a "$INSTALL_DIR/venv" "$VARDEN_SHARED_VENV" >> "$LOG_FILE" 2>&1 || true
+        chown -R "$CURRENT_USER:$CURRENT_GROUP" "$VARDEN_SHARED_VENV" 2>/dev/null || true
+        info "Populated shared venv at $VARDEN_SHARED_VENV for reuse."
     fi
 }
 
