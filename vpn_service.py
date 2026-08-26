@@ -2,6 +2,7 @@ import asyncio
 import logging
 import secrets
 import time
+from math import ceil
 
 try:
     from datetime import UTC
@@ -268,56 +269,32 @@ class VPNPanelService:
             return None
 
     @classmethod
-    async def update_client(cls, client: dict, email: str | None = None) -> None:
-        """Replace an existing client row. The server does NOT patch, so the
-        caller must send the full payload (use get_client first)."""
-        target = email or client.get("email")
-        if not target:
-            raise VPNPanelError("update_client requires a client with an email.")
-        await cls._request("POST", f"{CLIENTS_API}/update/{target}", client)
-
-    @classmethod
     async def extend_client(cls, email: str, duration_days: int, data_gb: int) -> dict:
-        """Extend an existing client by `duration_days` and reset its traffic
-        counters for a fresh period.
+        """Extend an existing client by `duration_days` and top up its traffic
+        quota via the panel's `bulkAdjust` endpoint.
 
-        Expiry is pushed forward from the later of (current expiry, now) so an
-        already-expired client is revived to now+duration. `data_gb == 0` means
-        unlimited data — its totalGB is left untouched. Returns the updated client.
+        Using `bulkAdjust` (instead of a full client GET -> UPDATE round-trip)
+        avoids the panel's strict client-model type checks (e.g. `id` must be a
+        string, `allowedIPs` a []string) that break naive full-payload updates.
+
+        For an active client the expiry is pushed forward by `duration_days`.
+        For an already-expired client it is revived to now + `duration_days`.
+        `data_gb == 0` means unlimited data and is left untouched.
         """
         client = await cls.get_client(email)
         if not client:
             raise VPNPanelError(f"Client {email} not found for renewal.")
-        # Normalize: some panel versions wrap the client under a "client" key,
-        # or omit the email field when fetched by email. Flatten and restore
-        # the email so the full-payload update (which needs it in URL + body)
-        # succeeds.
-        if not client.get("email") and isinstance(client.get("client"), dict):
-            client = client["client"]
-        client["email"] = email
-        # The panel's update model types `id` as a string, but the GET response
-        # returns it as a number — sending it back verbatim makes Go's JSON
-        # unmarshal fail. Coerce to str so the update succeeds.
-        if client.get("id") is not None:
-            client["id"] = str(client["id"])
         now_ms = int(datetime.now(UTC).timestamp() * 1000)
         existing_expiry = int(client.get("expiryTime", 0) or 0)
+        if existing_expiry > now_ms:
+            add_days = duration_days
+        else:
+            # Expired: shift so the new expiry lands at now + duration_days.
+            add_days = int(duration_days + max(1, ceil((now_ms - existing_expiry) / 86400000)))
+        payload: dict = {"emails": [email], "addDays": add_days}
         if data_gb and data_gb > 0:
-            base = existing_expiry if existing_expiry > now_ms else now_ms
-            client["expiryTime"] = base + duration_days * 86400 * 1000
-            client["totalGB"] = data_gb * 1024**3
-        elif existing_expiry and existing_expiry > 0:
-            # Unlimited data but time-limited: only push the expiry forward.
-            base = existing_expiry if existing_expiry > now_ms else now_ms
-            client["expiryTime"] = base + duration_days * 86400 * 1000
-        # else: fully unlimited (never expires) — nothing to extend.
-        client["enable"] = True
-        await cls.update_client(client, email)
-        # Start the new period with a clean usage counter.
-        try:
-            await cls._request("POST", f"{CLIENTS_API}/resetTraffic/{email}")
-        except VPNPanelError as exc:
-            log.warning("Could not reset traffic for renewed client %s: %s", email, exc)
+            payload["addBytes"] = data_gb * 1024**3
+        await cls._request("POST", f"{CLIENTS_API}/bulkAdjust", payload)
         return client
 
     @classmethod
