@@ -20,7 +20,10 @@ function pill(status) {
   return `<span class="pill ${status}">${status}</span>`;
 }
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function escapeAttr(s) {
+  return String(s).replace(/['"\\]/g, (c) => ({ "'": "&#39;", '"': "&quot;", "\\": "&#92;" }[c]));
 }
 async function fetchJSON(url, opts = {}) {
   const res = await fetch(url, { credentials: "include", ...opts });
@@ -81,15 +84,15 @@ async function loadOrders() {
       <tr>
         <td><code>#${o.id}</code></td>
         <td>
-          <div>${o.first_name ? escapeHtml(o.first_name) : "—"} <span class="muted">${o.username ? "@" + o.username : ""}</span></div>
+          <div>${o.first_name ? escapeHtml(o.first_name) : "—"} <span class="muted">${o.username ? "@" + escapeHtml(o.username) : ""}</span></div>
           <div class="muted"><code>${o.telegram_id || "—"}</code></div>
         </td>
         <td>${escapeHtml(o.package_label)}</td>
         <td>${fmtAmount(o.amount_toomans)}</td>
         <td>${pill(o.status)}</td>
-        <td>${o.payment_ref_id ? `<code>${o.payment_ref_id}</code><span class="copy" onclick="copyText('${o.payment_ref_id}')">copy</span>` : '<span class="muted">—</span>'}</td>
-        <td><code title="${o.payment_authority || ""}">${o.payment_authority ? o.payment_authority.slice(0, 12) + "…" : "—"}</code>${o.payment_authority ? `<span class="copy" onclick="copyText('${o.payment_authority}')">copy</span>` : ""}</td>
-        <td><code>${o.panel_email || "—"}</code></td>
+        <td>${o.payment_ref_id ? `<code>${escapeHtml(o.payment_ref_id)}</code><span class="copy" data-copy="${escapeAttr(o.payment_ref_id)}" onclick="copyText(this.dataset.copy)">copy</span>` : '<span class="muted">—</span>'}</td>
+        <td><code title="${escapeAttr(o.payment_authority || "")}">${o.payment_authority ? escapeHtml(o.payment_authority.slice(0, 12)) + "…" : "—"}</code>${o.payment_authority ? `<span class="copy" data-copy="${escapeAttr(o.payment_authority)}" onclick="copyText(this.dataset.copy)">copy</span>` : ""}</td>
+        <td><code>${escapeHtml(o.panel_email || "—")}</code></td>
         <td>${fmtDate(o.created_at)}</td>
       </tr>
     `
@@ -122,7 +125,7 @@ async function loadUsers() {
       <tr>
         <td><code>${u.id}</code></td>
         <td><code>${u.telegram_id}</code></td>
-        <td>${u.username ? "@" + u.username : "—"}</td>
+        <td>${u.username ? "@" + escapeHtml(u.username) : "—"}</td>
         <td>${escapeHtml(u.first_name || "—")}</td>
         <td>${u.order_count}</td>
         <td>${fmtDate(u.created_at)}</td>

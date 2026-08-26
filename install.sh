@@ -87,13 +87,13 @@ prompt_var() {
         # Trim surrounding whitespace without mangling the value (no xargs)
         input="${input#"${input%%[![:space:]]*}"}"
         input="${input%"${input##*[![:space:]]}"}"
-        # Allow URL-safe chars (?#&=%+) and common env values; block shell metachars ($`|;!*(){}<>\) to prevent injection via source.
-        if [[ "$input" =~ [\$\|\;\`\!\*\(\)\{\}\<\>\\] ]]; then
-            err "Value contains shell metacharacters that are unsafe for the env file."
+        # Block newlines and control chars; other chars are safely escaped via %q on write, so allow URL-safe and common values.
+        if [[ "$input" == *$'\n'* || "$input" == *$'\r'* ]]; then
+            err "Value must not contain newlines."
             continue
         fi
-        if [[ "$input" =~ $'\n' ]]; then
-            err "Value must not contain newlines."
+        if [[ "$input" == *$'\x00'* ]]; then
+            err "Value contains null bytes."
             continue
         fi
         if [[ "$required" == "true" ]] && [[ -z "$input" ]]; then
@@ -174,7 +174,8 @@ EOF
     fi
     local v
     for v in "${TO_WRITE[@]}"; do
-        echo "$v=\"${!v}\"" >> "$tmp_final"
+        # Use %q to safely escape any value for bash source (handles ", ', $, \, etc.)
+        printf '%s=%q\n' "$v" "${!v}" >> "$tmp_final"
     done
 
     mv "$tmp_final" "$ENV_FILE"
@@ -187,8 +188,21 @@ EOF
 
 configure_environment() {
     if [[ -f "$ENV_FILE" ]]; then
+        if [[ ! -r "$ENV_FILE" ]]; then
+            err "Cannot read $ENV_FILE"
+            exit 1
+        fi
+        # Validate file contains only safe assignments/comments before sourcing (defense-in-depth)
+        if grep -qvE '^[[:space:]]*(#.*|[A-Z_][A-Z0-9_]*=.*)?[[:space:]]*$' "$ENV_FILE" 2>/dev/null; then
+            err "Env file $ENV_FILE contains invalid lines — refusing to source."
+            grep -n -vE '^[[:space:]]*(#.*|[A-Z_][A-Z0-9_]*=.*)?[[:space:]]*$' "$ENV_FILE" >&2 || true
+            exit 1
+        fi
         # shellcheck disable=SC1090
+        set -a
+        # shellcheck disable=SC1091
         source "$ENV_FILE"
+        set +a
     fi
 
     load_var_spec
@@ -306,6 +320,34 @@ deploy_source() {
         while IFS= read -r -d '' db; do
             DB_FILES+=("$db")
         done < <(find "$INSTALL_DIR" -maxdepth 1 -type f \( -name "*.db" -o -name "*.sqlite3" -o -name "*.sqlite" \) -print0 2>/dev/null)
+    fi
+    # Also handle DATABASE_URL pointing outside INSTALL_DIR (e.g. /var/lib/farmstore/db.sqlite)
+    if [[ -n "${DATABASE_URL:-}" && "$DATABASE_URL" == sqlite* ]]; then
+        _db_path="${DATABASE_URL#*:///}"
+        _db_path="${_db_path%%\?*}"
+        # Normalize: handle :memory: and empty
+        if [[ -n "$_db_path" && "$_db_path" != :memory:* ]]; then
+            # Resolve relative paths against INSTALL_DIR / SCRIPT_DIR / cwd
+            if [[ "$_db_path" != /* ]]; then
+                for _base in "$INSTALL_DIR" "$SCRIPT_DIR" "$(pwd)"; do
+                    _cand="$_base/$_db_path"
+                    if [[ -f "$_cand" ]]; then
+                        _db_path="$_cand"
+                        break
+                    fi
+                done
+            fi
+            if [[ -f "$_db_path" ]]; then
+                _already=false
+                for _existing in "${DB_FILES[@]}"; do
+                    [[ "$_existing" == "$_db_path" ]] && _already=true && break
+                done
+                if [[ "$_already" == false ]]; then
+                    DB_FILES+=("$_db_path")
+                    info "Found DB via DATABASE_URL: $_db_path"
+                fi
+            fi
+        fi
     fi
 
     WIPE_DB=false

@@ -1,5 +1,11 @@
 import logging
-from datetime import UTC, datetime
+
+try:
+    from datetime import UTC
+except ImportError:  # Python <3.11
+
+    UTC = UTC  # type: ignore[no-redef]
+from datetime import datetime
 from html import escape
 
 from sqlalchemy import select

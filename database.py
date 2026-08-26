@@ -1,6 +1,9 @@
+import contextlib
 import logging
+import os
 
 from sqlalchemy import inspect
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -29,24 +32,24 @@ async def init_db():
 
     # B2 fix: ensure sqlite file is 600
     if config.database_url.startswith("sqlite"):
-        try:
-            import os
+        with contextlib.suppress(Exception):
+            try:
+                url = make_url(config.database_url)
+                db_path = url.database or ""
+                if db_path == ":memory:":
+                    db_path = ""
+            except Exception:
+                db_path = config.database_url.split(":///")[-1].split("?")[0]
 
-            db_path = config.database_url.split(":///")[-1].split("?")[0]
-            # Handle relative path (relative to cwd or INSTALL_DIR)
             if db_path and not db_path.startswith(":memory:"):
                 if os.path.exists(db_path):
-                    os.chmod(db_path, 0o600)
-                # also wal/shm if exist
+                    with contextlib.suppress(Exception):
+                        os.chmod(db_path, 0o600)
                 for suffix in ("-wal", "-shm"):
                     p = db_path + suffix
                     if os.path.exists(p):
-                        try:
+                        with contextlib.suppress(Exception):
                             os.chmod(p, 0o600)
-                        except Exception:
-                            pass
-        except Exception:
-            pass
 
 
 async def dispose_engine():

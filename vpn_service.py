@@ -2,7 +2,13 @@ import asyncio
 import logging
 import secrets
 import time
-from datetime import UTC, datetime, timedelta
+
+try:
+    from datetime import UTC
+except ImportError:  # Python <3.11
+
+    UTC = UTC  # type: ignore[no-redef]
+from datetime import datetime, timedelta
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx

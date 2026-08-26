@@ -8,7 +8,13 @@ import base64
 import hmac
 import logging
 import pathlib
-from datetime import UTC, datetime
+
+try:
+    from datetime import UTC
+except ImportError:  # Python <3.11
+
+    UTC = UTC  # type: ignore[no-redef]
+from datetime import datetime
 from html import escape
 
 from aiohttp import web
@@ -74,7 +80,7 @@ def _admin_auth_required_response() -> web.Response:
 
 @web.middleware
 async def admin_auth_middleware(request: web.Request, handler):
-    if request.path.startswith(ADMIN_PREFIX):
+    if request.path == ADMIN_PREFIX or request.path.startswith(ADMIN_PREFIX + "/"):
         if not config.admin_panel_enabled:
             return web.Response(
                 status=503, text="Admin panel not configured (ADMIN_PANEL_USER/PASS missing)"
@@ -186,20 +192,22 @@ async def handle_admin_orders(request: web.Request) -> web.Response:
         if to_s:
             conditions.append(Order.created_at <= to_s)
         if q:
-            like = f"%{q}%"
+            # Escape LIKE wildcards so %/_ in query don't broaden search
+            q_escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            like = f"%{q_escaped}%"
             # For telegram_id numeric exact match
             or_parts = [
-                Order.payment_ref_id.ilike(like),
-                Order.payment_authority.ilike(like),
-                Order.panel_email.ilike(like),
-                Order.sub_id.ilike(like),
-                Order.package_label.ilike(like),
+                Order.payment_ref_id.ilike(like, escape="\\"),
+                Order.payment_authority.ilike(like, escape="\\"),
+                Order.panel_email.ilike(like, escape="\\"),
+                Order.sub_id.ilike(like, escape="\\"),
+                Order.package_label.ilike(like, escape="\\"),
             ]
             if need_user_join:
                 or_parts.extend(
                     [
-                        User.username.ilike(like),
-                        User.first_name.ilike(like),
+                        User.username.ilike(like, escape="\\"),
+                        User.first_name.ilike(like, escape="\\"),
                     ]
                 )
                 # telegram_id as string
@@ -281,10 +289,11 @@ async def handle_admin_users(request: web.Request) -> web.Response:
         if to_s:
             conditions.append(User.created_at <= to_s)
         if q:
-            like = f"%{q}%"
+            q_escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            like = f"%{q_escaped}%"
             or_parts = [
-                User.username.ilike(like),
-                User.first_name.ilike(like),
+                User.username.ilike(like, escape="\\"),
+                User.first_name.ilike(like, escape="\\"),
             ]
             if q.isdigit():
                 try:

@@ -116,24 +116,26 @@ class Config:
 
     @property
     def zarinpal_base_url(self) -> str:
-        # Kept for backward compat — now points to API host (imitates toodej)
+        # Kept for backward compat — canonical is payment.zarinpal.com
         if self.zarinpal_sandbox:
             return "https://sandbox.zarinpal.com"
-        return "https://api.zarinpal.com"
+        return "https://payment.zarinpal.com"
 
     @property
     def zarinpal_api_base_url(self) -> str:
+        # Docs: https://payment.zarinpal.com/pg/v4/payment/* (api.zarinpal.com also works)
         if self.zarinpal_sandbox:
             return "https://sandbox.zarinpal.com"
-        return "https://api.zarinpal.com"
+        return "https://payment.zarinpal.com"
 
     @property
     def zarinpal_gateway_base_url(self) -> str:
-        # Mirrors toodej: https://zarinpal.com/pg/StartPay/ (naked domain)
+        # Docs: https://payment.zarinpal.com/pg/StartPay/{authority}
+        # toodej uses https://zarinpal.com (naked) which 301s to www/payment; we use canonical payment host
         # ZarinGate suffix (/ZarinGate) bypasses the checkout page when enabled.
         if self.zarinpal_sandbox:
             return "https://sandbox.zarinpal.com"
-        return "https://zarinpal.com"
+        return "https://payment.zarinpal.com"
 
     def zarinpal_startpay_url(self, authority: str) -> str:
         """Build the URL the user must be sent to to pay.

@@ -1,4 +1,9 @@
-from datetime import UTC, datetime
+try:
+    from datetime import UTC
+except ImportError:  # Python <3.11
+
+    UTC = UTC  # type: ignore[no-redef]
+from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship

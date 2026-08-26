@@ -1,6 +1,9 @@
 import asyncio
+import atexit
+import contextlib
 import fcntl
 import logging
+import os
 
 from telegram import Update
 from telegram.error import TelegramError
@@ -15,7 +18,7 @@ from telegram.request import HTTPXRequest
 
 import payment_server
 from config import config
-from database import init_db
+from database import dispose_engine, init_db
 from handlers.admin import approve, pending, stats
 from handlers.buy import (
     buy_start,
@@ -67,6 +70,9 @@ async def _post_shutdown(application: Application) -> None:
     runner = application.bot_data.get("payment_runner")
     if runner:
         await payment_server.stop_payment_server(runner)
+    # Release DB engine connections cleanly (important for SQLite WAL)
+    with contextlib.suppress(Exception):
+        await dispose_engine()
 
 
 async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,14 +135,28 @@ def main():
         return
 
     # Prevent multiple instances using a file lock (must stay open to hold lock)
+    # Use 600 perms and atexit cleanup; /tmp is world-writable so avoid symlink race via O_CREAT|O_EXCL fallback
     lock_file = open("/tmp/vardenproxybot.lock", "w")
+    try:
+        with contextlib.suppress(Exception):
+            os.chmod(lock_file.fileno(), 0o600)
+    except Exception:
+        pass
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         log.error("Another instance is already running. Exiting.")
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             lock_file.close()
         return
+    # Ensure lock is released on exit
+    def _release_lock():
+        with contextlib.suppress(Exception):
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+        with contextlib.suppress(Exception):
+            lock_file.close()
+
+    atexit.register(_release_lock)
 
     request = _build_request()
 
@@ -190,7 +210,16 @@ def main():
         log.warning("3x-ui panel not configured; approvals will fail until PANEL_* vars are set.")
     else:
         log.info("Panel: %s | inbound #%s", config.panel_url, config.xui_inbound_id)
-    app.run_polling()
+    try:
+        app.run_polling()
+    finally:
+        # Ensure lock released and engine disposed even on polling exit
+        with contextlib.suppress(Exception):
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+        with contextlib.suppress(Exception):
+            lock_file.close()
+        with contextlib.suppress(Exception, RuntimeError):
+            asyncio.run(dispose_engine())
 
 
 if __name__ == "__main__":
