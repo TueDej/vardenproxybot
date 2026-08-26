@@ -84,6 +84,10 @@ def _migrate_sync(sync_conn) -> None:
             )
         if "sub_id" not in cols:
             _add_col("ALTER TABLE orders ADD COLUMN sub_id VARCHAR(64)", "Added orders.sub_id")
+        if "renew_email" not in cols:
+            _add_col(
+                "ALTER TABLE orders ADD COLUMN renew_email VARCHAR(128)", "Added orders.renew_email"
+            )
         if "payment_authority" not in cols:
             _add_col(
                 "ALTER TABLE orders ADD COLUMN payment_authority VARCHAR(64)",

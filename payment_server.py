@@ -561,13 +561,26 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
             return await _paid_cancelled_flow(application, session, order, authority, outcome)
 
     ref = outcome["ref_id"]
-    await _notify(
-        application,
-        chat_id,
-        f"🎉 <b>پرداخت شما با موفقیت تأیید شد!</b> (سفارش #{escape(str(oid))})\n\n"
-        "کانفیگ شما آماده است؛ آن را از بخش «👤 پروفایل من» دریافت کنید.",
-    )
-    body = f"پرداخت با موفقیت تأیید شد (کد پیگیری: {escape(str(ref))}). به ربات برگردید و کانفیگ خود را دریافت کنید."
+    if order.renew_email:
+        await _notify(
+            application,
+            chat_id,
+            f"🎉 <b>تمدید اشتراک شما با موفقیت انجام شد!</b> (سفارش #{escape(str(oid))})\n\n"
+            "زمان اشتراک فعلی شما تمدید شد؛ همان کانفیگ قبلی همچنان معتبر است.\n"
+            "وضعیت را از بخش «👤 پروفایل من» بررسی کنید.",
+        )
+        body = (
+            f"تمدید با موفقیت انجام شد (کد پیگیری: {escape(str(ref))}). "
+            "اشتراک شما تمدید شد و کانفیگ قبلی فعال است."
+        )
+    else:
+        await _notify(
+            application,
+            chat_id,
+            f"🎉 <b>پرداخت شما با موفقیت تأیید شد!</b> (سفارش #{escape(str(oid))})\n\n"
+            "کانفیگ شما آماده است؛ آن را از بخش «👤 پروفایل من» دریافت کنید.",
+        )
+        body = f"پرداخت با موفقیت تأیید شد (کد پیگیری: {escape(str(ref))}). به ربات برگردید و کانفیگ خود را دریافت کنید."
     return _page("پرداخت موفق ✅", body)
 
 

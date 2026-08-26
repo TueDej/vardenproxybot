@@ -9,7 +9,12 @@ from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
-from handlers.buy import OrderAlreadyApproved, approve_order, format_vpn_config
+from handlers.buy import (
+    OrderAlreadyApproved,
+    approve_order,
+    format_vpn_config,
+    renew_order,
+)
 from models import Order
 from vpn_service import VPNPanelError, VPNPanelService
 
@@ -51,7 +56,10 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         try:
-            panel = await approve_order(session, order)
+            if order.renew_email:
+                panel = await renew_order(session, order)
+            else:
+                panel = await approve_order(session, order)
         except OrderAlreadyApproved:
             await update.message.reply_text(
                 f"⚠️ سفارش #{order_id} هم‌اکنون توسط شخص دیگری تأیید شد."

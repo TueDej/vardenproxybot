@@ -10,7 +10,7 @@ from datetime import datetime
 from html import escape
 
 from sqlalchemy import select
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from config import config
@@ -20,6 +20,12 @@ from models import User
 from vpn_service import VPNPanelError, VPNPanelService
 
 log = logging.getLogger(__name__)
+
+
+def _renew_keyboard(email: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔄 تمدید اشتراک", callback_data=f"renew|{email}")]]
+    )
 
 
 def _expiry_dt(ms: int) -> datetime | None:
@@ -128,7 +134,9 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = _format_product_message(c, expiry_dt, online_emails, now)
         if len(msg) > 4000:
             msg = msg[:3990] + "…"
-        await update.message.reply_text(msg, parse_mode="HTML")
+        await update.message.reply_text(
+            msg, reply_markup=_renew_keyboard(c["email"]), parse_mode="HTML"
+        )
         sent += 1
 
     for c, expiry_dt in expired:
@@ -138,7 +146,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         when = expiry_dt.strftime("%Y-%m-%d") if expiry_dt else "نامشخص"
         await update.message.reply_text(
             f"⌛ <b>منقضی‌شده</b> — {_data_label(c['total_gb'])}، پایان: {when}\n"
-            "برای تمدید، گزینه 🛒 خرید اشتراک را انتخاب کنید.",
+            "برای تمدید روی دکمه زیر بزنید یا گزینه 🛒 خرید اشتراک را انتخاب کنید.",
+            reply_markup=_renew_keyboard(c["email"]),
             parse_mode="HTML",
         )
         sent += 1

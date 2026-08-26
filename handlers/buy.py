@@ -234,6 +234,59 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def renew_order(session, order: Order) -> dict:
+    """Atomically claim a renewal order and extend its referenced panel client.
+
+    Returns {"email", "sub_id", "links"}. Mirrors approve_order's claim/revert
+    semantics but calls VPNPanelService.extend_client instead of create_client.
+    """
+    order_id = order.id
+    claim = await session.execute(
+        sa_update(Order)
+        .where(Order.id == order_id, Order.status == "pending")
+        .values(status="approved")
+    )
+    if claim.rowcount == 0:
+        current = (
+            await session.execute(select(Order.status).where(Order.id == order_id))
+        ).scalar_one_or_none()
+        if current == "approved":
+            raise OrderAlreadyApproved(order_id)
+        raise OrderNotApprovable(order_id, current)
+    await session.commit()
+    order.status = "approved"
+
+    try:
+        client = await VPNPanelService.extend_client(
+            order.renew_email, order.duration_days, order.data_gb
+        )
+    except VPNPanelError:
+        await session.rollback()
+        await session.execute(
+            sa_update(Order)
+            .where(Order.id == order_id, Order.status == "approved")
+            .values(status="pending")
+        )
+        await session.commit()
+        raise
+    except Exception:
+        await session.rollback()
+        try:
+            await session.execute(
+                sa_update(Order)
+                .where(Order.id == order_id, Order.status == "approved")
+                .values(status="pending")
+            )
+            await session.commit()
+        except Exception:
+            log.error("Failed to revert approved claim for order #%s", order_id, exc_info=True)
+        raise VPNPanelError(
+            f"Renewal failed for order #{order_id}: unexpected error"
+        ) from None
+
+    return {"email": client.get("email"), "sub_id": client.get("subId", ""), "links": []}
+
+
 async def verify_and_fulfill_order(session, order: Order) -> dict:
     """Verify the Zarinpal transaction server-side and provision the VPN.
 
@@ -242,7 +295,7 @@ async def verify_and_fulfill_order(session, order: Order) -> dict:
         ZarinpalError        — payment not verified (unpaid/cancelled/gateway error)
         OrderAlreadyApproved — another handler claimed it first
         VPNPanelError        — paid, but panel provisioning failed (order stays
-                               pending so a retry can complete it)
+                                pending so a retry can complete it)
     """
     if not order.payment_authority:
         raise ZarinpalError("Order has no payment authority.")
@@ -251,7 +304,10 @@ async def verify_and_fulfill_order(session, order: Order) -> dict:
     if order.status != "pending":
         raise OrderNotApprovable(order.id, order.status)
     outcome = await verify_payment(order.payment_authority, order.amount_toomans)
-    await approve_order(session, order)
+    if order.renew_email:
+        await renew_order(session, order)
+    else:
+        await approve_order(session, order)
     # approve_order committed; persist the reference separately (cosmetic).
     order.payment_ref_id = str(outcome["ref_id"]) if outcome["ref_id"] is not None else None
     session.add(order)  # re-attach in case approve_order's rollback detached it

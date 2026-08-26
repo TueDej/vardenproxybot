@@ -9,6 +9,7 @@ from telegram import Update
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -26,6 +27,7 @@ from handlers.buy import (
     package_selected,
 )
 from handlers.profile import profile
+from handlers.renew import renew_callback
 from handlers.start import help_command, start
 from vpn_service import VPNPanelService
 
@@ -179,6 +181,9 @@ def main():
     app.add_handler(CommandHandler("approve", approve))
     app.add_handler(CommandHandler("pending", pending))
     app.add_handler(CommandHandler("stats", stats))
+
+    # Inline button callbacks (e.g. renew subscription)
+    app.add_handler(CallbackQueryHandler(renew_callback, pattern=r"^renew\|"))
 
     # Text messages (reply keyboard)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))

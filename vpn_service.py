@@ -257,6 +257,58 @@ class VPNPanelService:
             return False
 
     @classmethod
+    async def get_client(cls, email: str) -> dict | None:
+        """Fetch the full client payload by email (preserves uuid/password/flow).
+
+        Returns the client dict on success, or None if the client is missing.
+        """
+        try:
+            return await cls._request("GET", f"{CLIENTS_API}/get/{email}")
+        except VPNPanelError:
+            return None
+
+    @classmethod
+    async def update_client(cls, client: dict) -> None:
+        """Replace an existing client row. The server does NOT patch, so the
+        caller must send the full payload (use get_client first)."""
+        email = client.get("email")
+        if not email:
+            raise VPNPanelError("update_client requires a client with an email.")
+        await cls._request("POST", f"{CLIENTS_API}/update/{email}", client)
+
+    @classmethod
+    async def extend_client(cls, email: str, duration_days: int, data_gb: int) -> dict:
+        """Extend an existing client by `duration_days` and reset its traffic
+        counters for a fresh period.
+
+        Expiry is pushed forward from the later of (current expiry, now) so an
+        already-expired client is revived to now+duration. `data_gb == 0` means
+        unlimited data — its totalGB is left untouched. Returns the updated client.
+        """
+        client = await cls.get_client(email)
+        if not client:
+            raise VPNPanelError(f"Client {email} not found for renewal.")
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+        existing_expiry = int(client.get("expiryTime", 0) or 0)
+        if data_gb and data_gb > 0:
+            base = existing_expiry if existing_expiry > now_ms else now_ms
+            client["expiryTime"] = base + duration_days * 86400 * 1000
+            client["totalGB"] = data_gb * 1024**3
+        elif existing_expiry and existing_expiry > 0:
+            # Unlimited data but time-limited: only push the expiry forward.
+            base = existing_expiry if existing_expiry > now_ms else now_ms
+            client["expiryTime"] = base + duration_days * 86400 * 1000
+        # else: fully unlimited (never expires) — nothing to extend.
+        client["enable"] = True
+        await cls.update_client(client)
+        # Start the new period with a clean usage counter.
+        try:
+            await cls._request("POST", f"{CLIENTS_API}/resetTraffic/{email}")
+        except VPNPanelError as exc:
+            log.warning("Could not reset traffic for renewed client %s: %s", email, exc)
+        return client
+
+    @classmethod
     async def get_inbound_client_emails(cls) -> set[str]:
         """Emails of all clients currently attached to the configured inbound."""
         inbound = await cls._request("GET", f"{INBOUNDS_API}/get/{config.xui_inbound_id}")
