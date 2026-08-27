@@ -80,12 +80,43 @@ async def _post_shutdown(application: Application) -> None:
 
 
 async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Route text messages based on button presses."""
+    """Route text messages based on button presses.
+
+    Awaiting-payment guard: while a pending order exists (DB status pending),
+    any navigation / text other than explicit ❌ انصراف auto-cancels the
+    pending order(s) and informs the user. This prevents orphan pendings
+    when the user leaves the payment screen. Cancel is DB-driven (survives
+    restart) and the payment callback will auto-reverse late payments.
+    """
     msg = update.effective_message
     if msg is None or not getattr(msg, "text", None):
         return
     # Avoid reacting to messages that are actually commands (safety if filter changes)
     text = (msg.text or "").strip()
+
+    # Explicit cancel — let cancel_order handle its own UX
+    if text == "❌ انصراف" or text == "❌ Cancel":
+        await cancel_order(update, context)
+        return
+
+    # ── Awaiting-payment guard: any other input while pending → auto-cancel ──
+    telegram_id = update.effective_user.id if update.effective_user else None
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if telegram_id is not None:
+        try:
+            from handlers.buy import cancel_all_pending_for_user
+
+            cancelled = await cancel_all_pending_for_user(telegram_id, context, chat_id)
+            if cancelled:
+                ids_str = ", #".join(str(i) for i in cancelled)
+                await update.effective_message.reply_text(
+                    f"❌ سفارش #{ids_str} به‌صورت خودکار <b>لغو</b> شد چون به بخش دیگری رفتید.\n"
+                    "💡 اگر مبلغی پرداخت کرده‌اید، به‌صورت خودکار به حساب شما بازگردانده می‌شود.",
+                    parse_mode="HTML",
+                )
+                # fall through to handle the new request normally
+        except Exception:
+            log.warning("pending guard failed", exc_info=True)
 
     # Main menu buttons
     if text == "🛒 خرید اشتراک":
@@ -111,14 +142,10 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید."
             )
             return
-    elif text == "❌ انصراف":
-        await cancel_order(update, context)
 
     # Legacy labels still sitting on old clients' keyboards
     elif text == "🔙 Main Menu" or text == "🏠 Home":
         await start(update, context)
-    elif text == "❌ Cancel":
-        await cancel_order(update, context)
 
     # Unknown
     else:

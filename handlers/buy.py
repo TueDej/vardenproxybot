@@ -62,6 +62,69 @@ async def expire_pending_orders(session) -> int:
     return result.rowcount or 0
 
 
+async def cancel_all_pending_for_user(
+    telegram_id: int,
+    context: ContextTypes.DEFAULT_TYPE | None = None,
+    chat_id: int | None = None,
+) -> list[int]:
+    """Cancel *all* pending orders for telegram_id (DB-driven, survives restart).
+
+    Returns list of cancelled order IDs (empty if none). Also best-effort
+    strips the inline pay button from the previous pay message and clears
+    context.user_data pending keys. Atomic: only pending → cancelled.
+    """
+    cancelled_ids: list[int] = []
+    try:
+        async with async_session() as session:
+            result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+            user = result.scalar_one_or_none()
+            if user is None:
+                return []
+            result = await session.execute(
+                select(Order.id).where(Order.user_id == user.id, Order.status == "pending")
+            )
+            ids = [r[0] for r in result.all()]
+            if not ids:
+                return []
+            await session.execute(
+                sa_update(Order)
+                .where(Order.user_id == user.id, Order.status == "pending")
+                .values(status="cancelled")
+            )
+            await session.commit()
+            cancelled_ids = ids
+    except Exception:
+        log.warning("cancel_all_pending_for_user failed for %s", telegram_id, exc_info=True)
+        return []
+
+    # Best-effort: strip the Zarinpal pay inline button so it can't be paid after cancel
+    if context is not None and chat_id is not None:
+        pay_message_id = None
+        try:
+            pay_message_id = context.user_data.get("pay_message_id") if hasattr(context, "user_data") else None
+        except Exception:
+            pay_message_id = None
+        if pay_message_id:
+            try:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=chat_id,
+                    message_id=pay_message_id,
+                    reply_markup=None,
+                )
+            except TelegramError as exc:
+                log.info("Could not strip pay button after auto-cancel %s: %s", cancelled_ids, exc)
+            except Exception:
+                pass
+        # Clear RAM pending markers (authoritative state is DB, but keep RAM consistent)
+        try:
+            if hasattr(context, "user_data"):
+                context.user_data.pop("order_id", None)
+                context.user_data.pop("pay_message_id", None)
+        except Exception:
+            pass
+    return cancelled_ids
+
+
 # Lookup map for text-based package selection — refreshed dynamically via packages.load_packages()
 def _build_package_map() -> dict[str, dict]:
     import packages as _pkg
@@ -259,7 +322,8 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["pay_message_id"] = sent.message_id
     await update.message.reply_text(
         "⏳ در انتظار پرداخت شما هستیم؛ پرداخت به‌صورت خودکار تشخیص داده می‌شود.\n"
-        "در این مدت می‌توانید سفارش را لغو کنید:",
+        "⚠️ تا تکمیل پرداخت از این صفحه خارج نشوید — با انتخاب هر گزینه‌ی دیگر یا ارسال هر پیامی، سفارش فعلی به‌صورت خودکار <b>لغو</b> می‌شود.\n"
+        "برای لغو دستی، «❌ انصراف» را بزنید:",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML",
     )

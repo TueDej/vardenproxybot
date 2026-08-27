@@ -31,11 +31,15 @@ def packages_keyboard():
 
 
 def cancel_keyboard():
-    """Gateway flow: payment is detected automatically, so only cancel/home."""
+    """Awaiting-payment: only explicit cancel.
+
+    Home is intentionally omitted — any navigation away from this state
+    auto-cancels the pending order (see menu_router guard). This makes
+    the destructive action explicit and prevents orphan pending orders.
+    """
     return ReplyKeyboardMarkup(
         [
             ["❌ انصراف"],
-            _HOME_ROW.copy(),
         ],
         resize_keyboard=True,
     )

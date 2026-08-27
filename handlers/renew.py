@@ -151,13 +151,15 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with async_session() as session:
         user_obj = await get_or_create_user(session, user)
-        # Supersede any pending renewal for the same client.
+        # Single pending invariant: creating a new renewal supersedes *any*
+        # pending order (buy or other renew) so the guard's auto-cancel
+        # and this creation stay consistent. Previously only same-email was
+        # cancelled, leaving orphan buy pendings.
         await session.execute(
             sa_update(Order)
             .where(
                 Order.user_id == user_obj.id,
                 Order.status == "pending",
-                Order.renew_email == email,
             )
             .values(status="cancelled")
         )
@@ -235,7 +237,9 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pay_keyboard = payment_keyboard(public_url, order.id, is_admin)
     await query.message.reply_text(renew_text, reply_markup=pay_keyboard, parse_mode="HTML")
     await query.message.reply_text(
-        "⏳ در انتظار پرداخت شما هستیم؛ پرداخت به‌صورت خودکار تشخیص داده می‌شود.",
+        "⏳ در انتظار پرداخت شما هستیم؛ پرداخت به‌صورت خودکار تشخیص داده می‌شود.\n"
+        "⚠️ تا تکمیل پرداخت از این صفحه خارج نشوید — با انتخاب هر گزینه‌ی دیگر یا ارسال هر پیامی، سفارش فعلی به‌صورت خودکار <b>لغو</b> می‌شود.\n"
+        "برای لغو دستی، «❌ انصراف» را بزنید:",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML",
     )
