@@ -808,6 +808,15 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
         chat_id = order.user.telegram_id
         oid = order.id  # snapshot — failures below may expire ORM attributes
 
+        # Sandbox mode: only admins may pay — defense in depth even if order
+        # was created before sandbox was enabled or via direct DB insert.
+        if config.zarinpal_sandbox and chat_id not in config.admin_ids:
+            log.warning("Sandbox mode: rejecting callback for non-admin order #%s user %s", oid, chat_id)
+            return _page(
+                "حالت آزمایشی",
+                "در حالت آزمایشی فقط مدیران امکان پرداخت دارند.",
+            )
+
         if order.status == "approved":
             return _page(
                 "قبلاً تأیید شده", "این سفارش قبلاً تأیید و فعال شده است. به ربات برگردید. ✅"
@@ -947,11 +956,24 @@ async def handle_zarinpal_start(request: web.Request) -> web.Response:
         return _page("پرداخت نامعتبر", "شناسه پرداخت نامعتبر است.")
     # Optional: verify order exists and is pending to avoid open-redirect abuse
     async with async_session() as session:
-        result = await session.execute(select(Order).where(Order.payment_authority == authority))
+        result = await session.execute(
+            select(Order).options(selectinload(Order.user)).where(Order.payment_authority == authority)
+        )
         order = result.scalar_one_or_none()
         if order is None:
             log.warning("Start page for unknown authority (len=%d)", len(authority))
             return _page("سفارش یافت نشد", "سفارشی برای این پرداخت پیدا نشد.")
+        # Sandbox mode: only admins may access the payment start page
+        if config.zarinpal_sandbox and order.user.telegram_id not in config.admin_ids:
+            log.warning(
+                "Sandbox mode: rejecting start page for non-admin order #%s user %s",
+                order.id,
+                order.user.telegram_id,
+            )
+            return _page(
+                "حالت آزمایشی",
+                "در حالت آزمایشی فقط مدیران امکان پرداخت دارند.",
+            )
         if order.status == "pending" and is_order_expired(order):
             try:
                 order.status = "cancelled"
