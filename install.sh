@@ -45,7 +45,7 @@ VAR_SPEC=(
     "PROXY_PORT|SOCKS5 Proxy Port|1080|false"
     "PROXY_USER|SOCKS5 Proxy Username (optional)||false"
     "PROXY_PASS|SOCKS5 Proxy Password (optional)||false"
-    "DATABASE_URL|Database URL|sqlite+aiosqlite:///vardenproxy.db|false"
+    "DATABASE_URL|Database URL|postgresql+psycopg://varden:varden_pass@localhost:5432/vardenproxy|false"
     "PANEL_URL|Panel URL incl. webBasePath||true"
     "PANEL_API_TOKEN|Panel API Token||true"
     "XUI_INBOUND_ID|Inbound ID||true"
@@ -437,7 +437,7 @@ install_dependencies() {
                 log "Shared venv copied: $VARDEN_SHARED_VENV -> $INSTALL_DIR/venv"
             fi
             chown -h "$CURRENT_USER:$CURRENT_GROUP" "$INSTALL_DIR/venv" 2>/dev/null || true
-            if "$INSTALL_DIR/venv/bin/python" -c "import telegram; import sqlalchemy; import aiosqlite; import aiohttp" >> "$LOG_FILE" 2>&1; then
+            if "$INSTALL_DIR/venv/bin/python" -c "import telegram; import sqlalchemy; import psycopg; import aiosqlite; import aiohttp" >> "$LOG_FILE" 2>&1; then
                 log "Import check passed (shared venv)."
                 return 0
             else
@@ -450,7 +450,7 @@ install_dependencies() {
 
     if [[ "${VARDEN_REUSE_VENV:-}" == "1" || "${VARDEN_REUSE_VENV:-}" == "true" ]]; then
         if [[ -d "$INSTALL_DIR/venv" && -x "$INSTALL_DIR/venv/bin/python" ]]; then
-            if "$INSTALL_DIR/venv/bin/python" -c "import telegram; import sqlalchemy; import aiosqlite; import aiohttp" >> "$LOG_FILE" 2>&1; then
+            if "$INSTALL_DIR/venv/bin/python" -c "import telegram; import sqlalchemy; import psycopg; import aiosqlite; import aiohttp" >> "$LOG_FILE" 2>&1; then
                 log "Reusing existing venv at $INSTALL_DIR/venv (VARDEN_REUSE_VENV=1, 0s)"
                 return 0
             fi
@@ -480,7 +480,7 @@ install_dependencies() {
         exit 1
     fi
 
-    if "$INSTALL_DIR/venv/bin/python" -c "import telegram; import sqlalchemy; import aiosqlite; import aiohttp" >> "$LOG_FILE" 2>&1; then
+    if "$INSTALL_DIR/venv/bin/python" -c "import telegram; import sqlalchemy; import psycopg; import aiosqlite; import aiohttp" >> "$LOG_FILE" 2>&1; then
         log "Import check passed."
     else
         err "Package verification failed. See $LOG_FILE"

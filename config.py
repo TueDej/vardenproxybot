@@ -26,6 +26,8 @@ def _int_env(name: str, default: int) -> int:
 class Config:
     bot_token: str = ""
     admin_ids: list[int] = field(default_factory=list)
+    # Default keeps sqlite for local dev; production should override via DATABASE_URL
+    # e.g. postgresql+psycopg://user:pass@localhost:5432/vardenproxy
     database_url: str = "sqlite+aiosqlite:///vardenproxy.db"
 
     # 3x-ui Panel

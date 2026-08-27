@@ -1,7 +1,8 @@
 # Requires Python >= 3.11 (uses datetime.UTC, PEP 604 unions)
 python-telegram-bot[job-queue]>=21.4
 SQLAlchemy>=2.0.37
-aiosqlite==0.20.0
+psycopg[binary]>=3.3  # postgres async driver (no compile); for asyncpg use postgresql+asyncpg:// + asyncpg
+aiosqlite==0.20.0  # kept for local dev fallback when DATABASE_URL is sqlite
 python-dotenv==1.0.1
 httpx[socks]>=0.27
 aiohttp>=3.9

@@ -12,11 +12,19 @@ from models import Base
 
 log = logging.getLogger(__name__)
 
-# Engine creation — use NullPool for sqlite to allow concurrent_updates=True
+# Engine creation — NullPool + check_same_thread only for sqlite to allow
+# concurrent_updates=True without pooling; postgres uses default AsyncAdaptedQueuePool
 _kwargs: dict = {"echo": False}
 if config.database_url.startswith("sqlite"):
     _kwargs["poolclass"] = NullPool
     _kwargs["connect_args"] = {"check_same_thread": False}
+elif config.database_url.startswith("postgresql"):
+    # Postgres: sane pool defaults for 256 concurrent telegram updates
+    # SQLAlchemy's default pool_size=5 is fine for low concurrency; bump for prod.
+    _kwargs["pool_size"] = 10
+    _kwargs["max_overflow"] = 20
+    _kwargs["pool_pre_ping"] = True
+    _kwargs["pool_recycle"] = 3600
 
 engine = create_async_engine(config.database_url, **_kwargs)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
@@ -30,7 +38,7 @@ async def init_db():
         except Exception:
             log.warning("Migration failed; continuing", exc_info=True)
 
-    # B2 fix: ensure sqlite file is 600
+    # sqlite file perms: ensure 600 (no-op for postgres)
     if config.database_url.startswith("sqlite"):
         with contextlib.suppress(Exception):
             try:
