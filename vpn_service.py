@@ -92,7 +92,7 @@ def rewrite_vless_link(link: str) -> str:
         "security": "tls",
         "sni": public_host,
         "fp": "chrome",
-        "alpn": "h2",
+        "alpn": "http/1.1",
         "insecure": "0",
         "allowInsecure": "0",
     }
