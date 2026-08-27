@@ -53,7 +53,7 @@ async def _resolve_renewal_terms(email: str, telegram_id: int | None = None) -> 
             data_gb = int(raw or 0) // (1024**3)
         except (TypeError, ValueError):
             data_gb = 0
-    pkgs, _, _ = load_packages()
+    pkgs = load_packages()[0]
     match = next((p for p in pkgs if p["data_gb"] == data_gb), None)
     if match:
         return match["label"], DURATION_DAYS, data_gb, match["price"]

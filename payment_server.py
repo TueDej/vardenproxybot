@@ -636,9 +636,14 @@ async def handle_admin_users(request: web.Request) -> web.Response:
 async def handle_admin_packages_get(request: web.Request) -> web.Response:
     import packages as pkg
 
-    packages, base, paused = pkg.load_packages()
+    packages, base, paused, discount_max = pkg.load_packages()
     return web.json_response(
-        {"base_price_per_gb": base, "packages": packages, "payments_paused": paused}
+        {
+            "base_price_per_gb": base,
+            "packages": packages,
+            "payments_paused": paused,
+            "discount_max_pct": discount_max,
+        }
     )
 
 
@@ -653,6 +658,7 @@ async def handle_admin_packages_save(request: web.Request) -> web.Response:
     base = data.get("base_price_per_gb")
     packages_in = data.get("packages")
     paused = data.get("payments_paused")
+    discount_max = data.get("discount_max_pct")
 
     # Validate base
     if base is not None:
@@ -664,6 +670,14 @@ async def handle_admin_packages_save(request: web.Request) -> web.Response:
             return web.json_response(
                 {"error": "base_price_per_gb out of range 1000..100000"}, status=400
             )
+
+    if discount_max is not None:
+        try:
+            discount_max = int(discount_max)
+        except (ValueError, TypeError):
+            return web.json_response({"error": "discount_max_pct must be integer"}, status=400)
+        if not (0 <= discount_max <= 60):
+            return web.json_response({"error": "discount_max_pct out of range 0..60"}, status=400)
 
     # Validate packages if provided
     if packages_in is not None:
@@ -689,11 +703,19 @@ async def handle_admin_packages_save(request: web.Request) -> web.Response:
                 if not (1000 <= price <= 10_000_000):
                     return web.json_response({"error": "Unlimited price out of range"}, status=400)
 
-    saved_pkgs, saved_base, saved_paused = pkg.save_packages(
-        packages=packages_in, base_price_per_gb=base, payments_paused=paused
+    saved_pkgs, saved_base, saved_paused, saved_discount_max = pkg.save_packages(
+        packages=packages_in,
+        base_price_per_gb=base,
+        payments_paused=paused,
+        discount_max_pct=discount_max,
     )
     return web.json_response(
-        {"base_price_per_gb": saved_base, "packages": saved_pkgs, "payments_paused": saved_paused}
+        {
+            "base_price_per_gb": saved_base,
+            "packages": saved_pkgs,
+            "payments_paused": saved_paused,
+            "discount_max_pct": saved_discount_max,
+        }
     )
 
 
@@ -819,7 +841,7 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
         try:
             import packages as _pkg
 
-            _, _, _paused = _pkg.load_packages()
+            _, _, _paused = _pkg.load_packages()[:3]
             if _paused and chat_id not in config.admin_ids:
                 log.warning("Paused mode: rejecting callback for non-admin order #%s user %s", oid, chat_id)
                 return _page(
@@ -989,7 +1011,7 @@ async def handle_zarinpal_start(request: web.Request) -> web.Response:
         try:
             import packages as _pkg
 
-            _, _, _paused = _pkg.load_packages()
+            _, _, _paused = _pkg.load_packages()[:3]
             if _paused and order.user.telegram_id not in config.admin_ids:
                 log.warning(
                     "Paused mode: rejecting start page for non-admin order #%s user %s",

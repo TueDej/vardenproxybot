@@ -130,7 +130,7 @@ async def cancel_all_pending_for_user(
 def _build_package_map() -> dict[str, dict]:
     import packages as _pkg
 
-    pkgs, _, _ = _pkg.load_packages()
+    pkgs = _pkg.load_packages()[0]
     return {f"{p['label']} - {p['price']:,} تومان": p for p in pkgs}
 
 
@@ -167,7 +167,7 @@ def purchase_blocked_reason(telegram_id: int) -> str | None:
     try:
         import packages as _pkg
 
-        _, _, _paused = _pkg.load_packages()
+        _, _, _paused = _pkg.load_packages()[:3]
         if _paused and telegram_id not in config.admin_ids:
             return "⏸ سرویس در حال به‌روزرسانی است — لطفاً چند دقیقه بعد دوباره تلاش کنید."
     except Exception:

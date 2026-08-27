@@ -169,15 +169,24 @@ window.copyText = (t) => {
 let packagesState = null;
 let originalPackagesState = null;
 
-function calcDiscount(gb) {
+function calcDiscount(gb, maxPct) {
   if (gb <= 10 || gb === 0) return 0;
-  return Math.min(0.28, 0.1 + (gb - 20) * 0.003);
+  const m = maxPct != null ? Math.max(0, Math.min(60, maxPct)) : (packagesState ? packagesState.discount_max_pct : 45);
+  const maxD = m / 100;
+  const base20 = maxD * 0.33;
+  if (gb <= 20) return (gb - 10) / 10 * base20;
+  return Math.min(maxD, base20 + (gb - 20) / 80 * (maxD - base20));
 }
-function calcPrice(base, gb, manual) {
+function calcPrice(base, gb, manual, maxPct) {
   if (gb === 0) return manual != null ? manual : 500000;
-  const d = calcDiscount(gb);
+  const m = maxPct != null ? maxPct : (packagesState ? packagesState.discount_max_pct : 45);
+  const d = calcDiscount(gb, m);
   const raw = base * gb * (1 - d);
   return Math.max(5000, Math.floor(raw / 5000) * 5000);
+}
+function discountHint(maxPct) {
+  const m = maxPct != null ? maxPct : (packagesState ? packagesState.discount_max_pct : 45);
+  return `Discount: 0% at 10GB → ${m}% at 100GB (harder curve, selectable). Unlimited is manual price.`;
 }
 
 function cloneState(s) {
@@ -198,10 +207,18 @@ async function loadPackages() {
 
 let dragIdx = null;
 
+function updateDiscountHint() {
+  const hint = $("#discount-hint");
+  if (hint) hint.textContent = discountHint(packagesState ? packagesState.discount_max_pct : 45);
+}
+
 function renderPackages() {
   if (!packagesState) return;
   $("#base-price").value = packagesState.base_price_per_gb;
+  $("#discount-max").value = packagesState.discount_max_pct != null ? packagesState.discount_max_pct : 45;
   $("#payments-paused").checked = !!packagesState.payments_paused;
+  const hint = $("#discount-hint");
+  if (hint) hint.textContent = discountHint(packagesState.discount_max_pct);
   const tbody = $("#packages-body");
   tbody.innerHTML = packagesState.packages
     .map((p, idx) => {
@@ -313,16 +330,17 @@ function onPkgInput(e) {
 }
 
 function collectPackagesFromDOM() {
-  // already in packagesState via input listeners, just read base/paused from inputs
+  // already in packagesState via input listeners, just read base/paused/discount from inputs
   const base = parseInt($("#base-price").value || "0", 10);
   const paused = $("#payments-paused").checked;
+  const discountMax = parseInt($("#discount-max").value || "0", 10);
   // packagesState already holds edits, but ensure data_gb is int
   const pkgs = packagesState.packages.map((p) => ({
     label: String(p.label).trim(),
     data_gb: parseInt(p.data_gb, 10) || 0,
-    price: p.data_gb === 0 ? parseInt(p.price, 10) || 0 : calcPrice(base, parseInt(p.data_gb, 10)),
+    price: p.data_gb === 0 ? parseInt(p.price, 10) || 0 : calcPrice(base, parseInt(p.data_gb, 10), null, discountMax),
   }));
-  return { base_price_per_gb: base, packages: pkgs, payments_paused: paused };
+  return { base_price_per_gb: base, packages: pkgs, payments_paused: paused, discount_max_pct: discountMax };
 }
 
 window.removePkg = (idx) => {
@@ -348,6 +366,25 @@ $("#base-price")?.addEventListener("input", () => {
     row.cells[3].textContent = disc;
     const priceCell = row.cells[4];
     if (p.data_gb === 0) return; // manual price, keep input
+    const price = calcPrice(base, p.data_gb);
+    priceCell.innerHTML = `<span>${fmtAmount(price)}</span> <span class="muted small">[${disc} off]</span>`;
+  });
+});
+
+$("#discount-max")?.addEventListener("input", () => {
+  const dm = parseInt($("#discount-max").value || "0", 10);
+  packagesState.discount_max_pct = Number.isNaN(dm) ? 0 : Math.max(0, Math.min(60, dm));
+  updateDiscountHint();
+  const rows = document.querySelectorAll("#packages-body tr[data-idx]");
+  rows.forEach((row) => {
+    const idx = parseInt(row.dataset.idx, 10);
+    const p = packagesState.packages[idx];
+    if (!p) return;
+    const disc = p.data_gb === 0 ? "—" : (calcDiscount(p.data_gb) * 100).toFixed(1) + "%";
+    row.cells[3].textContent = disc;
+    const priceCell = row.cells[4];
+    if (p.data_gb === 0) return;
+    const base = packagesState.base_price_per_gb;
     const price = calcPrice(base, p.data_gb);
     priceCell.innerHTML = `<span>${fmtAmount(price)}</span> <span class="muted small">[${disc} off]</span>`;
   });

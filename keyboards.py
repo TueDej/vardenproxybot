@@ -14,7 +14,7 @@ _HOME_ROW = list(HOME_BUTTON)
 
 def _package_buttons():
     try:
-        pkgs, _, _ = _pkg_mod.load_packages()
+        pkgs = _pkg_mod.load_packages()[0]
     except Exception:
         pkgs = _pkg_mod.PACKAGES
     rows = [[f"{p['label']} - {p['price']:,} تومان"] for p in pkgs]

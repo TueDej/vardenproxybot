@@ -109,12 +109,15 @@
           <label>Base price per GB (toman)
             <input id="base-price" type="number" min="1000" max="100000" step="100" placeholder="4500">
           </label>
+          <label>Max volume discount (% at 100GB)
+            <input id="discount-max" type="number" min="0" max="60" step="1" placeholder="45">
+          </label>
           <label class="switch">
             <input id="payments-paused" type="checkbox">
             <span>Block new payments (maintenance)</span>
           </label>
         </div>
-        <div class="muted small">Discount: 0% at 10GB → ~28% at 100GB (diminishing). Unlimited is manual price.</div>
+        <div class="muted small" id="discount-hint">Discount: 0% at 10GB → 45% at 100GB (harder curve, selectable). Unlimited is manual price.</div>
       </div>
       <div class="table-wrap">
         <table id="packages-table">
