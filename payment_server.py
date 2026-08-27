@@ -896,6 +896,16 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
                 "پرداختی برای این تراکنش ثبت نشده است. اگر مبلغ کسر شده، کمی بعد دوباره تلاش کنید.",
             )
         except VPNPanelError as exc:
+            if "exceed" in str(exc).lower() or "60" in str(exc):
+                log.info("Order #%s renewal exceeds 60 days (panel): %s", oid, exc)
+                try:
+                    outcome = await verify_payment(order.payment_authority, order.amount_toomans)
+                except ZarinpalError:
+                    return _page(
+                        "تمدید ممکن نیست",
+                        "مجموع زمان اشتراک پس از تمدید بیش از 60 روز می‌شود — تمدید انجام نشد.",
+                    )
+                return await _paid_cancelled_flow(application, session, order, authority, outcome)
             log.error("Order #%s PAID but provisioning failed: %s", oid, exc)
             await _notify(
                 application,
@@ -908,7 +918,18 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
             return _page(
                 "قبلاً تأیید شده", "این سفارش قبلاً تأیید و فعال شده است. به ربات برگردید. ✅"
             )
-        except OrderNotApprovable:
+        except OrderNotApprovable as exc:
+            # 60-day limit: inform user and auto-refund if money moved
+            if "exceed" in str(exc).lower() or "60" in str(exc):
+                log.info("Order #%s renewal exceeds 60 days: %s", oid, exc)
+                try:
+                    outcome = await verify_payment(order.payment_authority, order.amount_toomans)
+                except ZarinpalError:
+                    return _page(
+                        "تمدید ممکن نیست",
+                        "مجموع زمان اشتراک پس از تمدید بیش از 60 روز می‌شود — تمدید انجام نشد.",
+                    )
+                return await _paid_cancelled_flow(application, session, order, authority, outcome)
             # Order was cancelled while we were verifying — money may have
             # moved; verify explicitly and auto-refund.
             try:

@@ -65,8 +65,16 @@ async def free_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
         except OrderAlreadyApproved:
             await query.message.reply_text("⚠️ این سفارش قبلاً تأیید شده است.", parse_mode="HTML")
             return
-        except OrderNotApprovable:
-            await query.message.reply_text("⚠️ این سفارش قابل پرداخت نیست.", parse_mode="HTML")
+        except OrderNotApprovable as exc:
+            # 60-day limit is surfaced as OrderNotApprovable with "exceed" in status
+            msg = str(exc) or ""
+            if "exceed" in msg.lower() or "60" in msg:
+                await query.message.reply_text(
+                    f"⛔ تمدید ممکن نیست — مجموع زمان اشتراک پس از تمدید بیش از 60 روز می‌شود.\n<code>{escape(msg)}</code>",
+                    parse_mode="HTML",
+                )
+            else:
+                await query.message.reply_text("⚠️ این سفارش قابل پرداخت نیست.", parse_mode="HTML")
             return
         except VPNPanelError as exc:
             log.warning("Admin free fulfillment failed for order #%s: %s", order_id, exc)

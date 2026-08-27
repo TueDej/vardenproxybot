@@ -15,6 +15,7 @@ DEFAULT_BASE_PRICE = 4500  # toman per GB (10GB anchor)
 DEFAULT_DISCOUNT_MAX_PCT = 45  # harder discount: 0% at 10GB → 45% at 100GB (selectable via admin panel)
 
 DURATION_DAYS = 30
+MAX_SUBSCRIPTION_DAYS = 60
 
 _SETTINGS_PATH = pathlib.Path(__file__).parent / "admin_settings.json"
 

@@ -408,6 +408,38 @@ async def renew_order(session, order: Order) -> dict:
     semantics but calls VPNPanelService.extend_client instead of create_client.
     """
     order_id = order.id
+    # 60-day total limit — defense in depth (UI already blocks in renew_callback)
+    if order.renew_email and order.duration_days:
+        try:
+            from packages import MAX_SUBSCRIPTION_DAYS
+
+            pclient = await VPNPanelService.get_client(order.renew_email)
+            if pclient is not None:
+                inner = pclient.get("client") if isinstance(pclient.get("client"), dict) else pclient
+                expiry_ms = 0
+                if isinstance(inner, dict):
+                    expiry_ms = int(inner.get("expiryTime") or 0)
+                if not expiry_ms and isinstance(pclient, dict):
+                    try:
+                        expiry_ms = int(pclient.get("expiryTime") or 0)
+                    except Exception:
+                        expiry_ms = 0
+                if expiry_ms:
+                    now_ms = int(datetime.now(UTC).timestamp() * 1000)
+                    remaining_ms = expiry_ms - now_ms
+                    if remaining_ms > 0:
+                        remaining_days = (remaining_ms + 86400000 - 1) // 86400000
+                        if remaining_days + int(order.duration_days) > MAX_SUBSCRIPTION_DAYS:
+                            raise OrderNotApprovable(
+                                order_id,
+                                f"renewal would exceed {MAX_SUBSCRIPTION_DAYS} days (remaining {remaining_days} + {order.duration_days})",
+                            )
+        except OrderNotApprovable:
+            raise
+        except VPNPanelError:
+            raise
+        except Exception as e:
+            log.warning("Renewal 60-day pre-check failed for order #%s: %s", order_id, e)
     # Defense-in-depth IDOR: ensure renew_email belongs to the order's owner.
     # The UI check in renew_callback already blocks forged callbacks, but the
     # payment callback / free-confirm paths also reach here, so verify again.

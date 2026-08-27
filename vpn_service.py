@@ -319,6 +319,21 @@ class VPNPanelService:
             client = client["client"]
         now_ms = int(datetime.now(UTC).timestamp() * 1000)
         existing_expiry = int(client.get("expiryTime", 0) or 0)
+        # 60-day total limit — block renewal that would exceed cap
+        if existing_expiry > now_ms:
+            try:
+                from packages import MAX_SUBSCRIPTION_DAYS
+
+                remaining_days = (existing_expiry - now_ms + 86400000 - 1) // 86400000
+                if remaining_days + int(duration_days) > MAX_SUBSCRIPTION_DAYS:
+                    raise VPNPanelError(
+                        f"Renewal would exceed {MAX_SUBSCRIPTION_DAYS} days (remaining {remaining_days} + {duration_days}). "
+                        "You cannot exceed 60 days per subscription."
+                    )
+            except VPNPanelError:
+                raise
+            except Exception:
+                pass
         if existing_expiry > now_ms:
             add_days = duration_days
         else:

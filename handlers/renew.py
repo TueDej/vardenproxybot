@@ -12,11 +12,14 @@ from handlers.buy import get_or_create_user, purchase_blocked_reason
 from handlers.rate_limit import check_cooldown
 from keyboards import cancel_keyboard, payment_keyboard
 from models import Order, User
-from packages import DURATION_DAYS, load_packages
+from packages import DURATION_DAYS, MAX_SUBSCRIPTION_DAYS, load_packages
 from vpn_service import VPNPanelError, VPNPanelService
 from zarinpal import ZarinpalError, request_payment
 
 log = logging.getLogger(__name__)
+
+# Maximum total subscription length after renewal
+MAX_TOTAL_DAYS = MAX_SUBSCRIPTION_DAYS
 
 
 async def _resolve_renewal_terms(email: str, telegram_id: int | None = None) -> tuple[str, int, int, int]:
@@ -108,6 +111,50 @@ async def _is_renewal_owned(email: str, telegram_id: int) -> bool:
     return False
 
 
+async def _check_renewal_limit(email: str, duration_days: int) -> tuple[bool, int]:
+    """Check if renewal would exceed MAX_TOTAL_DAYS.
+
+    Returns (allowed, remaining_days). If not allowed, caller should block
+    renewal and inform the user. Fetches panel client to read expiryTime.
+    """
+    try:
+        client = await VPNPanelService.get_client(email)
+    except VPNPanelError:
+        # If panel unavailable, allow renewal to proceed — it will fail later with proper error
+        return True, 0
+    if not client:
+        return True, 0
+    # Unwrap possible {"client": {...}} wrapper
+    inner = client.get("client") if isinstance(client.get("client"), dict) else client
+    expiry_ms = 0
+    if isinstance(inner, dict):
+        expiry_ms = int(inner.get("expiryTime") or 0)
+    if not expiry_ms and isinstance(client, dict):
+        try:
+            expiry_ms = int(client.get("expiryTime") or 0)
+        except Exception:
+            expiry_ms = 0
+    if not expiry_ms:
+        # No expiry (unlimited) — allow renewal, it will set to now+duration
+        return True, 0
+    try:
+        from datetime import UTC, datetime
+
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+    except Exception:
+        import time
+
+        now_ms = int(time.time() * 1000)
+    remaining_ms = expiry_ms - now_ms
+    if remaining_ms <= 0:
+        return True, 0
+    remaining_days = (remaining_ms + 86400000 - 1) // 86400000  # ceil
+    total_after = remaining_days + duration_days
+    if total_after > MAX_TOTAL_DAYS:
+        return False, int(remaining_days)
+    return True, int(remaining_days)
+
+
 async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -148,6 +195,19 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
         return
+
+    # 60-day limit: renewal must not push total subscription beyond MAX_TOTAL_DAYS
+    try:
+        allowed, remaining_days = await _check_renewal_limit(email, duration_days)
+        if not allowed:
+            await query.message.reply_text(
+                f"⛔ تمدید ممکن نیست — مجموع زمان اشتراک پس از تمدید بیش از {MAX_TOTAL_DAYS} روز می‌شود.\n"
+                f"⏳ باقی‌مانده فعلی: {remaining_days} روز — لطفاً پس از نزدیک شدن به انقضا دوباره تلاش کنید.",
+                parse_mode="HTML",
+            )
+            return
+    except Exception as exc:
+        log.warning("Renewal limit check failed for %s: %s", email, exc)
 
     async with async_session() as session:
         user_obj = await get_or_create_user(session, user)
