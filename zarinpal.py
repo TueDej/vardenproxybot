@@ -67,8 +67,9 @@ def _error_detail(data: Any, status_code: int, path: str) -> str:
 async def _post(path: str, payload: dict, retries: int = 3) -> dict:
     """POST JSON to the gateway and return the decoded response object.
 
-    Connection-level failures (DNS, timeouts, resets) are retried with a
-    short backoff so transient blips don't kill the order flow.
+    Connection-level failures (DNS, timeouts, resets) and HTTP 5xx/429
+    are retried with backoff so transient blips don't kill the order flow.
+    Respects Retry-After on 429.
     """
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
@@ -85,6 +86,31 @@ async def _post(path: str, payload: dict, retries: int = 3) -> dict:
             if attempt < retries:
                 await asyncio.sleep(0.5 * attempt)
             continue
+
+        # Retry on server errors and rate-limit
+        if resp.status_code == 429 or resp.status_code >= 500:
+            retry_after = resp.headers.get("Retry-After")
+            try:
+                wait = float(retry_after) if retry_after else 0.5 * attempt
+                wait = max(0.5, min(wait, 10))
+            except (TypeError, ValueError):
+                wait = 0.5 * attempt
+            snippet = " ".join((resp.text or "").split())[:160]
+            last_exc = ZarinpalError(
+                f"HTTP {resp.status_code} [{path}]: {snippet or resp.reason_phrase}"
+            )
+            log.warning(
+                "Gateway %s attempt %d/%d HTTP %s, retrying in %.1fs",
+                path,
+                attempt,
+                retries,
+                resp.status_code,
+                wait,
+            )
+            if attempt < retries:
+                await asyncio.sleep(wait)
+                continue
+            raise last_exc
 
         try:
             data = resp.json()

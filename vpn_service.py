@@ -176,6 +176,33 @@ class VPNPanelService:
             else:
                 if resp.status_code in (401, 403):
                     raise VPNPanelError("Panel authentication failed — check PANEL_API_TOKEN.")
+                # Retry on rate-limit and server errors before parsing
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    retry_after = resp.headers.get("Retry-After")
+                    try:
+                        wait = float(retry_after) if retry_after else 0.5 * attempt
+                        wait = max(0.5, min(wait, 10))
+                    except (TypeError, ValueError):
+                        wait = 0.5 * attempt
+                    snippet = " ".join((resp.text or "").split())[:160]
+                    msg = f"HTTP {resp.status_code}"
+                    if snippet:
+                        msg += f": {snippet}"
+                    last_error = VPNPanelError(f"Panel error [{method} {path}]: {msg} (retrying in {wait:.1f}s)")
+                    log.warning(
+                        "Panel %s %s attempt %d/%d HTTP %s, retrying in %.1fs",
+                        method,
+                        path,
+                        attempt,
+                        retries,
+                        resp.status_code,
+                        wait,
+                    )
+                    if attempt < retries:
+                        await asyncio.sleep(wait)
+                        continue
+                    # last attempt — fall through to raise
+                    continue
                 try:
                     data = resp.json()
                 except ValueError:
@@ -188,8 +215,8 @@ class VPNPanelService:
                 if isinstance(data, dict):
                     if not data.get("success"):
                         msg = data.get("msg") or f"HTTP {resp.status_code}"
-                        # Retry on server errors (5xx), fail fast on client errors (4xx, auth)
-                        if resp.status_code >= 500:
+                        # Retry on server errors (5xx) and rate-limit (429), fail fast on client errors (4xx, auth)
+                        if resp.status_code == 429 or resp.status_code >= 500:
                             last_error = VPNPanelError(f"Panel error [{method} {path}]: {msg}")
                         else:
                             raise VPNPanelError(f"Panel error [{method} {path}]: {msg}")
@@ -209,7 +236,9 @@ class VPNPanelService:
 
         Returns {"email", "sub_id", "links"} where links are ready-to-import URIs.
         """
-        email = f"vp{telegram_id}-{int(time.time())}"
+        # Millisecond + random suffix prevents duplicate email on concurrent
+        # create_client calls within the same second (same telegram_id).
+        email = f"vp{telegram_id}-{int(time.time() * 1000)}-{secrets.token_hex(2)}"
         sub_id = secrets.token_hex(8)
         payload = {
             "client": {
