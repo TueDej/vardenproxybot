@@ -4,10 +4,13 @@ Binds to a loopback address only; a reverse proxy (Caddy/nginx) terminates
 TLS on the public domain and forwards here.
 """
 
+import asyncio
 import base64
+import collections
 import hmac
 import logging
 import pathlib
+import time
 
 try:
     from datetime import UTC
@@ -77,6 +80,79 @@ def _is_admin_authenticated(request: web.Request) -> bool:
 def _admin_auth_required_response() -> web.Response:
     headers = {"WWW-Authenticate": 'Basic realm="Varden Admin"'}
     return web.Response(status=401, text="Authentication required", headers=headers)
+
+
+# ── Rate limit (in-memory, per-IP sliding window) ─────────────────
+
+# path prefix -> (max_requests, window_seconds)
+_RATE_LIMITS: dict[str, tuple[int, int]] = {
+    CALLBACK_PATH: (20, 60),  # Zarinpal callback: 20/min per IP+authority
+    "/zarinpal/start": (30, 60),  # start page: 30/min per IP
+    ADMIN_PREFIX: (60, 60),  # admin API/UI: 60/min per IP
+    "/healthz": (120, 60),
+}
+
+_rate_hits: dict[str, collections.deque] = {}
+_rate_lock = asyncio.Lock()
+
+
+def _client_ip(request: web.Request) -> str:
+    # Caddy sets X-Forwarded-For; trust first entry when behind proxy
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    # Fallback to peer
+    peer = request.remote or "unknown"
+    return peer
+
+
+def _rate_key(request: web.Request) -> str | None:
+    path = request.path
+    # exact callback, prefix for start/admin
+    for prefix, (_limit, _window) in _RATE_LIMITS.items():
+        if path == prefix or path.startswith(prefix + "/"):
+            # per-authority sub-key for callback to prevent enumeration flood
+            if prefix == CALLBACK_PATH:
+                auth = (request.rel_url.query.get("Authority") or "")[:16]
+                return f"{_client_ip(request)}:{prefix}:{auth}"
+            return f"{_client_ip(request)}:{prefix}"
+    return None
+
+
+@web.middleware
+async def rate_limit_middleware(request: web.Request, handler):
+    key = _rate_key(request)
+    if key is not None:
+        # find matching limit
+        path = request.path
+        limit = window = 60
+        for prefix, (lim, win) in _RATE_LIMITS.items():
+            if path == prefix or path.startswith(prefix + "/"):
+                limit, window = lim, win
+                break
+        now = time.monotonic()
+        async with _rate_lock:
+            dq = _rate_hits.get(key)
+            if dq is None:
+                dq = collections.deque()
+                _rate_hits[key] = dq
+            # prune old
+            while dq and dq[0] <= now - window:
+                dq.popleft()
+            if len(dq) >= limit:
+                retry = int(dq[0] + window - now) + 1
+                return web.Response(
+                    status=429,
+                    text="Too Many Requests",
+                    headers={"Retry-After": str(max(1, retry))},
+                )
+            dq.append(now)
+            # cap memory
+            if len(_rate_hits) > 2000:
+                # drop oldest 20% keys
+                for k in list(_rate_hits.keys())[:400]:
+                    _rate_hits.pop(k, None)
+    return await handler(request)
 
 
 @web.middleware
@@ -657,7 +733,8 @@ async def handle_health(request: web.Request) -> web.Response:
 
 
 def build_app(application) -> web.Application:
-    app = web.Application(middlewares=[admin_auth_middleware])
+    # rate_limit first so 429s are cheap, then auth
+    app = web.Application(middlewares=[rate_limit_middleware, admin_auth_middleware])
     app["ptb_application"] = application
     app.router.add_get(CALLBACK_PATH, handle_zarinpal_callback)
     app.router.add_get("/zarinpal/start/{authority}", handle_zarinpal_start)

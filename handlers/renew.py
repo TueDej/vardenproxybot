@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 from config import config
 from database import async_session
 from handlers.buy import get_or_create_user, purchase_blocked_reason
+from handlers.rate_limit import check_cooldown
 from keyboards import cancel_keyboard, payment_keyboard
 from models import Order
 from packages import DURATION_DAYS, load_packages
@@ -53,6 +54,11 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.message is None:
+        return
+
+    if not await check_cooldown(update.effective_user.id, "renew", 8):
+        if query.message:
+            await query.message.reply_text("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید.")
         return
 
     email = ""

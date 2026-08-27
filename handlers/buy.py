@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
+from handlers.rate_limit import check_cooldown
 from keyboards import (
     cancel_keyboard,
     home_keyboard,
@@ -102,6 +103,9 @@ async def get_or_create_user(session, telegram_user) -> User:
 
 
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_cooldown(update.effective_user.id, "buy_start", 5):
+        await update.message.reply_text("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید.")
+        return
     is_admin = update.effective_user.id in config.admin_ids
     if not is_admin:
         blocked = purchase_blocked_reason(update.effective_user.id)
@@ -117,6 +121,9 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_cooldown(update.effective_user.id, "package_selected", 8):
+        await update.message.reply_text("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید.")
+        return
     text = (update.message.text or "").strip()
     pkg = _get_package_map().get(text)
     if not pkg:

@@ -1,4 +1,3 @@
-import asyncio
 import atexit
 import contextlib
 import fcntl
@@ -64,6 +63,8 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _post_init(application: Application) -> None:
+    # Single-loop init: runs on the same event loop as polling (fixes double asyncio.run)
+    await init_db()
     if config.zarinpal_configured:
         runner = await payment_server.start_payment_server(application)
         application.bot_data["payment_runner"] = runner
@@ -220,15 +221,12 @@ def main():
     try:
         app.run_polling()
     finally:
-        # Ensure lock released and engine disposed even on polling exit
+        # Ensure lock released; DB engine is disposed in _post_shutdown (same loop)
         with contextlib.suppress(Exception):
             fcntl.flock(lock_file, fcntl.LOCK_UN)
         with contextlib.suppress(Exception):
             lock_file.close()
-        with contextlib.suppress(Exception, RuntimeError):
-            asyncio.run(dispose_engine())
 
 
 if __name__ == "__main__":
-    asyncio.run(init_db())
     main()

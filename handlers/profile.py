@@ -15,6 +15,7 @@ from telegram.ext import ContextTypes
 
 from config import config
 from database import async_session
+from handlers.rate_limit import check_cooldown
 from keyboards import home_keyboard, main_menu_keyboard
 from models import User
 from vpn_service import VPNPanelError, VPNPanelService
@@ -67,6 +68,9 @@ def _format_product_message(
 
 
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_cooldown(update.effective_user.id, "profile", 5):
+        await update.message.reply_text("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید.")
+        return
     telegram_id = update.effective_user.id
     async with async_session() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
