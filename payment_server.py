@@ -682,12 +682,16 @@ async def handle_admin_discounts_create(request: web.Request) -> web.Response:
         return web.json_response({"error": "discount_percent must be integer 1-100"}, status=400)
     if not (1 <= pct <= 100):
         return web.json_response({"error": "discount_percent out of range 1..100"}, status=400)
+    # Optional admin-supplied prefix (alnum, truncated in generator)
+    prefix = data.get("prefix")
+    if prefix is not None and not str(prefix).strip():
+        prefix = None
     # generate
     from handlers.discount import generate_unique_code
 
     async with async_session() as session:
         try:
-            dc = await generate_unique_code(session, pct)
+            dc = await generate_unique_code(session, pct, prefix)
         except Exception as e:
             log.error("Failed to generate discount code: %s", e, exc_info=True)
             return web.json_response({"error": "Could not generate code"}, status=500)

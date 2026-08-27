@@ -507,7 +507,7 @@ $("#disc-generate")?.addEventListener("click", async () => {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
       credentials: "include",
-      body: JSON.stringify({ discount_percent: pct }),
+      body: JSON.stringify({ discount_percent: pct, prefix: ($("#disc-prefix").value || "").trim() }),
     });
     if (res.status === 401) { window.location.href = "/admin/login"; return; }
     if (!res.ok) throw new Error(await res.text());

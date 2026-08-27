@@ -13,16 +13,32 @@ from models import DiscountCode, Order
 log = logging.getLogger(__name__)
 
 CODE_ALPHABET = string.ascii_uppercase + string.digits
-CODE_LEN = 8  # e.g. 8 chars like 1A2B3C4D
+CODE_LEN = 8  # fallback length when no prefix is supplied
+CODE_SUFFIX_LEN = 6  # random part appended after an optional admin prefix
+PREFIX_MAX_LEN = 12  # admin-supplied prefix is truncated to this
+
+def _sanitize_prefix(prefix: str | None) -> str:
+    """Normalize an admin prefix: uppercase alnum only, truncated."""
+    if not prefix:
+        return ""
+    out = "".join(ch for ch in str(prefix).strip().upper() if ch.isalnum())
+    return out[:PREFIX_MAX_LEN]
 
 def _generate_code() -> str:
-    # Avoid confusing chars: remove O,0,I,1? keep simple for now
+    # Legacy 8-char format used when no prefix is supplied
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     return "".join(secrets.choice(alphabet) for _ in range(CODE_LEN))
 
-async def generate_unique_code(session, discount_percent: int) -> DiscountCode:
-    for _ in range(20):
-        code = _generate_code()
+def _generate_suffix() -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(CODE_SUFFIX_LEN))
+
+async def generate_unique_code(session, discount_percent: int, prefix: str | None = None) -> DiscountCode:
+    norm_prefix = _sanitize_prefix(prefix)
+    for _ in range(30):
+        suffix = _generate_suffix()
+        # Without a prefix we keep the legacy 8-char format for familiarity.
+        code = (norm_prefix + suffix) if norm_prefix else _generate_code()
         # check collision
         exists = (await session.execute(select(DiscountCode).where(DiscountCode.code == code))).scalar_one_or_none()
         if exists is None:
