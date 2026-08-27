@@ -49,6 +49,18 @@ def home_keyboard():
     return ReplyKeyboardMarkup([_HOME_ROW.copy()], resize_keyboard=True)
 
 
+def discount_prompt_keyboard() -> InlineKeyboardMarkup:
+    """Prompt before gateway: ask whether user has a discount code."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🎟️ Yes, I have a code", callback_data="disc|yes"),
+                InlineKeyboardButton("⏭️ No, continue", callback_data="disc|no"),
+            ]
+        ]
+    )
+
+
 def payment_keyboard(public_url: str | None, order_id: int, is_admin: bool) -> InlineKeyboardMarkup:
     """Build the payment prompt buttons.
 

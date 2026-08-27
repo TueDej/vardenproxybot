@@ -106,3 +106,23 @@ def _migrate_sync(sync_conn) -> None:
                 "ALTER TABLE orders ADD COLUMN payment_ref_id VARCHAR(32)",
                 "Added orders.payment_ref_id",
             )
+        if "discount_code" not in cols:
+            _add_col(
+                "ALTER TABLE orders ADD COLUMN discount_code VARCHAR(32)",
+                "Added orders.discount_code",
+            )
+        if "discount_percent" not in cols:
+            _add_col(
+                "ALTER TABLE orders ADD COLUMN discount_percent INTEGER",
+                "Added orders.discount_percent",
+            )
+        if "original_amount_toomans" not in cols:
+            _add_col(
+                "ALTER TABLE orders ADD COLUMN original_amount_toomans INTEGER",
+                "Added orders.original_amount_toomans",
+            )
+        if "discount_code_id" not in cols:
+            _add_col(
+                "ALTER TABLE orders ADD COLUMN discount_code_id INTEGER REFERENCES discount_codes(id) ON DELETE SET NULL",
+                "Added orders.discount_code_id",
+            )

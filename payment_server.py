@@ -37,7 +37,7 @@ from handlers.buy import (
     verify_and_fulfill_order,
 )
 from keyboards import main_menu_keyboard
-from models import Order, User
+from models import DiscountCode, Order, User
 from vpn_service import VPNPanelError
 from zarinpal import ZarinpalError, reverse_payment, verify_payment
 
@@ -647,6 +647,79 @@ async def handle_admin_packages_get(request: web.Request) -> web.Response:
     )
 
 
+async def handle_admin_discounts_get(request: web.Request) -> web.Response:
+    async with async_session() as session:
+        result = await session.execute(select(DiscountCode).order_by(DiscountCode.created_at.desc()))
+        codes = result.scalars().all()
+        items = []
+        for c in codes:
+            items.append(
+                {
+                    "id": c.id,
+                    "code": c.code,
+                    "discount_percent": c.discount_percent,
+                    "is_used": bool(c.is_used),
+                    "created_at": c.created_at.isoformat() if c.created_at else None,
+                    "used_at": c.used_at.isoformat() if c.used_at else None,
+                    "used_by_telegram_id": c.used_by_telegram_id,
+                    "used_order_id": c.used_order_id,
+                }
+            )
+        return web.json_response({"items": items})
+
+
+async def handle_admin_discounts_create(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    pct = data.get("discount_percent")
+    if pct is None:
+        pct = data.get("discount_pct")
+    try:
+        pct = int(pct)
+    except (ValueError, TypeError):
+        return web.json_response({"error": "discount_percent must be integer 1-100"}, status=400)
+    if not (1 <= pct <= 100):
+        return web.json_response({"error": "discount_percent out of range 1..100"}, status=400)
+    # generate
+    from handlers.discount import generate_unique_code
+
+    async with async_session() as session:
+        try:
+            dc = await generate_unique_code(session, pct)
+        except Exception as e:
+            log.error("Failed to generate discount code: %s", e, exc_info=True)
+            return web.json_response({"error": "Could not generate code"}, status=500)
+        return web.json_response(
+            {
+                "id": dc.id,
+                "code": dc.code,
+                "discount_percent": dc.discount_percent,
+                "is_used": bool(dc.is_used),
+                "created_at": dc.created_at.isoformat() if dc.created_at else None,
+            }
+        )
+
+
+async def handle_admin_discounts_delete(request: web.Request) -> web.Response:
+    code_id = request.match_info.get("id")
+    try:
+        code_id = int(code_id)
+    except (ValueError, TypeError):
+        return web.json_response({"error": "invalid id"}, status=400)
+    async with async_session() as session:
+        result = await session.execute(select(DiscountCode).where(DiscountCode.id == code_id))
+        dc = result.scalar_one_or_none()
+        if dc is None:
+            return web.json_response({"error": "not found"}, status=404)
+        if dc.is_used:
+            return web.json_response({"error": "cannot delete used code"}, status=400)
+        await session.delete(dc)
+        await session.commit()
+        return web.json_response({"ok": True})
+
+
 async def handle_admin_packages_save(request: web.Request) -> web.Response:
     import packages as pkg
 
@@ -1095,6 +1168,9 @@ def build_app(application) -> web.Application:
     app.router.add_get(ADMIN_PREFIX + "/api/users", handle_admin_users)
     app.router.add_get(ADMIN_PREFIX + "/api/packages", handle_admin_packages_get)
     app.router.add_post(ADMIN_PREFIX + "/api/packages", handle_admin_packages_save)
+    app.router.add_get(ADMIN_PREFIX + "/api/discounts", handle_admin_discounts_get)
+    app.router.add_post(ADMIN_PREFIX + "/api/discounts", handle_admin_discounts_create)
+    app.router.add_delete(ADMIN_PREFIX + "/api/discounts/{id}", handle_admin_discounts_delete)
     # Static files for admin UI (public for login page styling)
     static_dir = _admin_static_dir()
     if static_dir.exists():

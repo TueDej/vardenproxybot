@@ -25,6 +25,7 @@ from handlers.buy import (
     cancel_order,
     package_selected,
 )
+from handlers.discount_flow import discount_code_entered, handle_disc_prompt_callback
 from handlers.free import free_confirm_callback
 from handlers.profile import profile
 from handlers.renew import renew_callback
@@ -98,6 +99,12 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Explicit cancel — let cancel_order handle its own UX
     if text == "❌ انصراف" or text == "❌ Cancel":
         await cancel_order(update, context)
+        return
+
+    # ── Awaiting discount-code entry: intercept free text before the
+    # auto-cancel guard so the typed code is not treated as navigation. ──
+    if context.user_data.get("awaiting_discount_code"):
+        await discount_code_entered(update, context)
         return
 
     # ── Awaiting-payment guard: any other input while pending → auto-cancel ──
@@ -270,6 +277,7 @@ def main():
     # Inline button callbacks (e.g. renew subscription, admin free confirm)
     app.add_handler(CallbackQueryHandler(renew_callback, pattern=r"^renew\|"))
     app.add_handler(CallbackQueryHandler(free_confirm_callback, pattern=r"^free\|"))
+    app.add_handler(CallbackQueryHandler(handle_disc_prompt_callback, pattern=r"^disc\|"))
 
     # Text messages (reply keyboard)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_router))

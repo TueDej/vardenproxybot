@@ -434,6 +434,96 @@ $("#payments-paused")?.addEventListener("change", () => {
   packagesState.payments_paused = $("#payments-paused").checked;
 });
 
+// ── discounts ──
+async function loadDiscounts() {
+  try {
+    const data = await fetchJSON("/admin/api/discounts");
+    const tbody = $("#discounts-body");
+    if (!data.items.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="muted">No discount codes yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.items
+      .map((c) => {
+        const status = c.is_used
+          ? '<span class="pill approved">Used</span>'
+          : '<span class="pill pending">Available</span>';
+        const usedBy = c.used_by_telegram_id ? `<code>${c.used_by_telegram_id}</code>` : "—";
+        const usedAt = c.used_at ? fmtDate(c.used_at) : "—";
+        const created = fmtDate(c.created_at);
+        const actions = c.is_used
+          ? '<span class="muted">—</span>'
+          : `<button class="btn" onclick="deleteDiscount(${c.id})">🗑 Delete</button>`;
+        return `
+        <tr>
+          <td><code>${escapeHtml(c.code)}</code><span class="copy" data-copy="${escapeAttr(c.code)}" onclick="copyText(this.dataset.copy)">copy</span></td>
+          <td>${c.discount_percent}%</td>
+          <td>${status}</td>
+          <td>${usedBy}</td>
+          <td>${usedAt}</td>
+          <td>${created}</td>
+          <td>${actions}</td>
+        </tr>`;
+      })
+      .join("");
+  } catch (e) {
+    console.error(e);
+    $("#discounts-body").innerHTML = '<tr><td colspan="7" class="muted">Failed to load</td></tr>';
+  }
+}
+
+window.deleteDiscount = async (id) => {
+  if (!confirm("Delete this unused discount code?")) return;
+  try {
+    const res = await fetch(`/admin/api/discounts/${id}`, {
+      method: "DELETE",
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      credentials: "include",
+    });
+    if (res.status === 401) { window.location.href = "/admin/login"; return; }
+    if (!res.ok) throw new Error(await res.text());
+    $("#disc-msg").textContent = "Deleted ✓";
+    $("#disc-msg").style.color = "#5fb68a";
+    loadDiscounts();
+  } catch (e) {
+    $("#disc-msg").textContent = "Delete failed: " + e.message;
+    $("#disc-msg").style.color = "#e07a7a";
+  }
+};
+
+$("#disc-generate")?.addEventListener("click", async () => {
+  const pct = parseInt($("#disc-pct").value || "0", 10);
+  if (!pct || pct < 1 || pct > 100) {
+    $("#disc-msg").textContent = "Enter a discount percent between 1 and 100";
+    $("#disc-msg").style.color = "#e07a7a";
+    return;
+  }
+  const btn = $("#disc-generate");
+  btn.disabled = true;
+  btn.textContent = "Generating…";
+  $("#disc-msg").textContent = "";
+  try {
+    const res = await fetch("/admin/api/discounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
+      credentials: "include",
+      body: JSON.stringify({ discount_percent: pct }),
+    });
+    if (res.status === 401) { window.location.href = "/admin/login"; return; }
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    $("#disc-msg").textContent = `Generated code ${data.code} (${data.discount_percent}%). Click copy to copy.`;
+    $("#disc-msg").style.color = "#5fb68a";
+    loadDiscounts();
+  } catch (e) {
+    $("#disc-msg").textContent = "Generate failed: " + e.message;
+    $("#disc-msg").style.color = "#e07a7a";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Generate code";
+  }
+});
+
 // ── nav ──
 function switchTab(tab) {
   currentTab = tab;
@@ -443,11 +533,13 @@ function switchTab(tab) {
   $("#orders-panel").classList.toggle("hidden", tab !== "orders");
   $("#users-panel").classList.toggle("hidden", tab !== "users");
   $("#packages-panel").classList.toggle("hidden", tab !== "packages");
+  $("#discounts-panel").classList.toggle("hidden", tab !== "discounts");
   $("#page-title").textContent = tab.charAt(0).toUpperCase() + tab.slice(1);
-  document.querySelector("#toolbar-orders").style.display = tab === "packages" ? "none" : "flex";
+  document.querySelector("#toolbar-orders").style.display = tab === "packages" || tab === "discounts" ? "none" : "flex";
   if (tab === "orders") loadOrders();
   else if (tab === "users") loadUsers();
   else if (tab === "packages") loadPackages();
+  else if (tab === "discounts") loadDiscounts();
 }
 
 document.querySelectorAll(".nav-item, .tab").forEach((btn) => {

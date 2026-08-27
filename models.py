@@ -33,6 +33,28 @@ class User(Base):
     )
 
 
+class DiscountCode(Base):
+    __tablename__ = "discount_codes"
+    __table_args__ = (
+        CheckConstraint("discount_percent >= 1 AND discount_percent <= 100", name="ck_discount_percent"),
+        Index("ix_discount_codes_code", "code", unique=True),
+        Index("ix_discount_codes_is_used", "is_used"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    discount_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_used: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_by_telegram_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    used_order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+    )
+
+
 class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
@@ -67,6 +89,13 @@ class Order(Base):
     renew_email: Mapped[str | None] = mapped_column(String(128), nullable=True)
     payment_authority: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payment_ref_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Discount code applied to this order (one-time use)
+    discount_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    original_amount_toomans: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    discount_code_id: Mapped[int | None] = mapped_column(
+        ForeignKey("discount_codes.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

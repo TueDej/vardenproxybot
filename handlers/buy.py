@@ -20,16 +20,14 @@ from config import config
 from database import async_session
 from handlers.rate_limit import check_cooldown
 from keyboards import (
-    cancel_keyboard,
     home_keyboard,
     main_menu_keyboard,
     packages_keyboard,
-    payment_keyboard,
 )
 from models import Order, User
 from packages import DURATION_DAYS
 from vpn_service import VPNPanelError, VPNPanelService
-from zarinpal import ZarinpalError, request_payment, verify_payment
+from zarinpal import ZarinpalError, verify_payment
 
 log = logging.getLogger(__name__)
 
@@ -54,12 +52,29 @@ async def expire_pending_orders(session) -> int:
     from datetime import timedelta
 
     cutoff = datetime.now(UTC) - timedelta(seconds=PAYMENT_EXPIRY_SECONDS)
+    # Collect IDs first to release discount codes after cancel
+    try:
+        ids_res = await session.execute(
+            select(Order.id).where(Order.status == "pending", Order.created_at < cutoff)
+        )
+        expired_ids = [r[0] for r in ids_res.all()]
+    except Exception:
+        expired_ids = []
     result = await session.execute(
         sa_update(Order)
         .where(Order.status == "pending", Order.created_at < cutoff)
         .values(status="cancelled")
     )
     await session.commit()
+    # Release discount codes for expired orders
+    if expired_ids:
+        try:
+            from handlers.discount import release_discount_codes_for_cancelled_orders
+
+            async with async_session() as rs:
+                await release_discount_codes_for_cancelled_orders(rs, expired_ids)
+        except Exception:
+            log.warning("Failed to release discount codes for expired orders %s", expired_ids, exc_info=True)
     return result.rowcount or 0
 
 
@@ -94,6 +109,13 @@ async def cancel_all_pending_for_user(
             )
             await session.commit()
             cancelled_ids = ids
+            # Release discount codes for cancelled orders
+            try:
+                from handlers.discount import release_discount_codes_for_cancelled_orders
+
+                await release_discount_codes_for_cancelled_orders(session, ids)
+            except Exception:
+                log.warning("Failed to release discount codes for cancelled %s", ids, exc_info=True)
     except Exception:
         log.warning("cancel_all_pending_for_user failed for %s", telegram_id, exc_info=True)
         return []
@@ -257,77 +279,10 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await session.commit()
         await session.refresh(order)
 
-    context.user_data["order_id"] = order.id
+    # Ask about discount code BEFORE generating the gateway (resume on choice)
+    from handlers.discount_flow import send_discount_prompt
 
-    # Build the payment prompt. Non-admins must pay via Zarinpal; admins always
-    # get a free-confirm button (see payment_keyboard) and may also pay normally.
-    is_admin = update.effective_user.id in config.admin_ids
-    public_url = None
-    if not is_admin:
-        try:
-            pay = await request_payment(
-                order.id, pkg["price"], f"VardenProxy subscription — {pkg['label']} (order #{order.id})"
-            )
-        except ZarinpalError as exc:
-            log.warning("Payment request for order #%s failed: %s", order.id, exc)
-            async with async_session() as session:
-                await session.execute(
-                    sa_update(Order).where(Order.id == order.id).values(status="cancelled")
-                )
-                await session.commit()
-            context.user_data.pop("order_id", None)
-            await update.message.reply_text(
-                "❌ <b>خطا در ایجاد پرداخت</b>\nلطفاً چند دقیقه بعد دوباره تلاش کنید.",
-                parse_mode="HTML",
-            )
-            return
-        async with async_session() as session:
-            await session.execute(
-                sa_update(Order).where(Order.id == order.id).values(payment_authority=pay["authority"])
-            )
-            await session.commit()
-        public_url = config.zarinpal_public_start_url(pay["authority"])
-    else:
-        # Admin: try Zarinpal too, but never block on its failure — the
-        # free-confirm button is always offered so they can provision for free.
-        try:
-            pay = await request_payment(
-                order.id, pkg["price"], f"VardenProxy subscription — {pkg['label']} (order #{order.id})"
-            )
-            async with async_session() as session:
-                await session.execute(
-                    sa_update(Order).where(Order.id == order.id).values(payment_authority=pay["authority"])
-                )
-                await session.commit()
-            public_url = config.zarinpal_public_start_url(pay["authority"])
-        except ZarinpalError as exc:
-            log.warning("Admin payment request for order #%s failed (offering free): %s", order.id, exc)
-
-    separator = "─" * 20
-    gateway_text = (
-        f"💳 <b>سفارش #{order.id}</b>\n\n"
-        f"📦 پکیج: {escape(pkg['label'])}\n"
-        f"📅 مدت: یک ماه\n"
-        f"💰 مبلغ: <b>{pkg['price']:,} تومان</b>\n\n"
-        f"{separator}\n"
-        "برای پرداخت امن، روی دکمه زیر بزنید و پرداخت را در <b>درگاه زرین‌پال</b> انجام دهید.\n"
-        "✅ بلافاصله پس از پرداخت، اشتراک شما به‌صورت خودکار فعال می‌شود.\n"
-        "⏰ این لینک پرداخت فقط <b>15 دقیقه</b> معتبر است؛ پس از آن سفارش به‌صورت خودکار لغو می‌شود."
-    )
-    if is_admin:
-        gateway_text += "\n\n🔧 <i>ادمین:</i> می‌توانید بدون پرداخت، اشتراک را به‌صورت رایگان تأیید کنید."
-    pay_keyboard = payment_keyboard(public_url, order.id, is_admin)
-    sent = await update.message.reply_text(
-        gateway_text, reply_markup=pay_keyboard, parse_mode="HTML"
-    )
-    context.user_data["pay_message_id"] = sent.message_id
-    await update.message.reply_text(
-        "⏳ در انتظار پرداخت شما هستیم؛ پرداخت به‌صورت خودکار تشخیص داده می‌شود.\n"
-        "⚠️ تا تکمیل پرداخت از این صفحه خارج نشوید — با انتخاب هر گزینه‌ی دیگر یا ارسال هر پیامی، سفارش فعلی به‌صورت خودکار <b>لغو</b> می‌شود.\n"
-        "برای لغو دستی، «❌ انصراف» را بزنید:",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML",
-    )
+    await send_discount_prompt(update, context, order)
 
 
 async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -394,6 +349,8 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log.info("Could not strip pay button for order #%s: %s", order_id, exc)
 
     context.user_data.pop("order_id", None)
+    context.user_data.pop("awaiting_discount_code", None)
+    context.user_data.pop("pending_order_id", None)
     await update.message.reply_text(
         f"❌ سفارش #{order_id} لغو شد.",
         reply_markup=home_keyboard(),

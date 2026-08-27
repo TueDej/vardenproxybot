@@ -20,6 +20,7 @@
       <button class="nav-item active" data-tab="orders">Orders</button>
       <button class="nav-item" data-tab="users">Users</button>
       <button class="nav-item" data-tab="packages">Packages</button>
+      <button class="nav-item" data-tab="discounts">Discounts</button>
     </nav>
     <div class="sidebar-footer muted">
       <div><a href="/admin/logout" class="muted" style="color:#8aa098;text-decoration:none">⎋ Logout</a></div>
@@ -141,6 +142,34 @@
         <button id="pkg-save" class="btn primary">Save</button>
       </div>
       <div id="pkg-msg" class="muted small" style="margin-top:8px"></div>
+    </section>
+
+    <section id="discounts-panel" class="panel hidden">
+      <div class="discounts-header">
+        <div class="packages-controls">
+          <label>Discount percent (%)
+            <input id="disc-pct" type="number" min="1" max="100" step="1" placeholder="20">
+          </label>
+          <button id="disc-generate" class="btn primary">Generate code</button>
+        </div>
+        <div id="disc-msg" class="muted small" style="margin-top:8px"></div>
+      </div>
+      <div class="table-wrap">
+        <table id="discounts-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>%</th>
+              <th>Status</th>
+              <th>Used by</th>
+              <th>Used at</th>
+              <th>Created</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="discounts-body"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
     </section>
 
     <footer class="footer muted">VardenProxy • Admin panel • Read-only • Search indexes status/authority/ref</footer>
