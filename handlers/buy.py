@@ -268,6 +268,67 @@ async def renew_order(session, order: Order) -> dict:
     semantics but calls VPNPanelService.extend_client instead of create_client.
     """
     order_id = order.id
+    # Defense-in-depth IDOR: ensure renew_email belongs to the order's owner.
+    # The UI check in renew_callback already blocks forged callbacks, but the
+    # payment callback / free-confirm paths also reach here, so verify again.
+    if order.renew_email:
+        try:
+            # Fetch owner telegram_id for this order
+            owner_tg = None
+            try:
+                result = await session.execute(select(User.telegram_id).where(User.id == order.user_id))
+                owner_tg = result.scalar_one_or_none()
+            except Exception:
+                owner_tg = None
+            if owner_tg is not None:
+                # Check DB history first
+                db_owned = False
+                try:
+                    hist = await session.execute(
+                        select(Order.id)
+                        .join(User, Order.user_id == User.id)
+                        .where(Order.panel_email == order.renew_email, User.telegram_id == owner_tg)
+                        .limit(1)
+                    )
+                    db_owned = hist.scalar_one_or_none() is not None
+                except Exception:
+                    db_owned = False
+                if not db_owned:
+                    # Fall back to panel tgId check
+                    try:
+                        pclient = await VPNPanelService.get_client(order.renew_email)
+                        if pclient is not None:
+                            inner = pclient.get("client") if isinstance(pclient.get("client"), dict) else pclient
+                            tg = None
+                            if isinstance(inner, dict):
+                                tg = inner.get("tgId")
+                            if tg is None and isinstance(pclient, dict):
+                                tg = pclient.get("tgId")
+                            if tg is not None and str(tg) != str(owner_tg):
+                                raise OrderNotApprovable(order_id, f"renew_email {order.renew_email} not owned by user {owner_tg}")
+                            if tg is None:
+                                # tg missing — verify via list
+                                try:
+                                    clients = await VPNPanelService.get_clients_by_telegram_id(int(owner_tg))
+                                    if not any(c.get("email") == order.renew_email for c in clients):
+                                        raise OrderNotApprovable(order_id, f"renew_email {order.renew_email} not owned by user {owner_tg}")
+                                except VPNPanelError as e:
+                                    raise VPNPanelError(f"Cannot verify renewal ownership for {order.renew_email}: {e}") from e
+                        else:
+                            raise OrderNotApprovable(order_id, f"renew client {order.renew_email} not found")
+                    except OrderNotApprovable:
+                        raise
+                    except VPNPanelError:
+                        raise
+                    except Exception as e:
+                        raise VPNPanelError(f"Ownership check failed for {order.renew_email}: {e}") from e
+        except OrderNotApprovable:
+            raise
+        except VPNPanelError:
+            raise
+        except Exception as e:
+            log.warning("Renewal ownership pre-check failed for order #%s: %s", order_id, e)
+
     claim = await session.execute(
         sa_update(Order)
         .where(Order.id == order_id, Order.status == "pending")

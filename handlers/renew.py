@@ -11,7 +11,7 @@ from database import async_session
 from handlers.buy import get_or_create_user, purchase_blocked_reason
 from handlers.rate_limit import check_cooldown
 from keyboards import cancel_keyboard, payment_keyboard
-from models import Order
+from models import Order, User
 from packages import DURATION_DAYS, load_packages
 from vpn_service import VPNPanelError, VPNPanelService
 from zarinpal import ZarinpalError, request_payment
@@ -19,19 +19,20 @@ from zarinpal import ZarinpalError, request_payment
 log = logging.getLogger(__name__)
 
 
-async def _resolve_renewal_terms(email: str) -> tuple[str, int, int, int]:
+async def _resolve_renewal_terms(email: str, telegram_id: int | None = None) -> tuple[str, int, int, int]:
     """Return (package_label, duration_days, data_gb, amount_toomans) for a renewal.
 
     Prefers the user's last approved order for this client (keeps the price they
     paid). Falls back to the package list priced by the client's current data.
+    When telegram_id is supplied the DB lookup is scoped to that user to avoid
+    leaking another user's pricing.
     """
     async with async_session() as session:
-        result = await session.execute(
-            select(Order)
-            .where(Order.panel_email == email, Order.status == "approved")
-            .order_by(Order.created_at.desc())
-            .limit(1)
-        )
+        q = select(Order).where(Order.panel_email == email, Order.status == "approved")
+        if telegram_id is not None:
+            q = q.join(User, Order.user_id == User.id).where(User.telegram_id == telegram_id)
+        q = q.order_by(Order.created_at.desc()).limit(1)
+        result = await session.execute(q)
         orig = result.scalar_one_or_none()
     if orig is not None:
         return orig.package_label, orig.duration_days, orig.data_gb, orig.amount_toomans
@@ -40,7 +41,18 @@ async def _resolve_renewal_terms(email: str) -> tuple[str, int, int, int]:
     client = await VPNPanelService.get_client(email)
     data_gb = 0
     if client:
-        data_gb = (int(client.get("totalGB") or 0)) // (1024**3)
+        # get_client may return {"client": {...}} wrapper (see vpn_service.extend_client)
+        inner = client.get("client") if isinstance(client.get("client"), dict) else client
+        # totalGB may be on wrapper or inner
+        raw = None
+        if isinstance(inner, dict):
+            raw = inner.get("totalGB")
+        if raw is None and isinstance(client, dict):
+            raw = client.get("totalGB")
+        try:
+            data_gb = int(raw or 0) // (1024**3)
+        except (TypeError, ValueError):
+            data_gb = 0
     pkgs, _, _ = load_packages()
     match = next((p for p in pkgs if p["data_gb"] == data_gb), None)
     if match:
@@ -48,6 +60,52 @@ async def _resolve_renewal_terms(email: str) -> tuple[str, int, int, int]:
     # Last resort: 30 days at the largest package price.
     price = max((p["price"] for p in pkgs), default=0)
     return "Renewal", DURATION_DAYS, data_gb, price
+
+
+async def _is_renewal_owned(email: str, telegram_id: int) -> bool:
+    """Verify that panel client `email` belongs to `telegram_id`.
+
+    Checks DB history first (cheap), then panel tgId. Returns False if
+    ownership cannot be confirmed.
+    """
+    # 1. DB history: any approved order with panel_email == email owned by user
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(Order.id)
+                .join(User, Order.user_id == User.id)
+                .where(Order.panel_email == email, User.telegram_id == telegram_id)
+                .limit(1)
+            )
+            if result.scalar_one_or_none() is not None:
+                return True
+    except Exception:
+        pass
+
+    # 2. Panel: check tgId on the client object
+    try:
+        client = await VPNPanelService.get_client(email)
+        if client is not None:
+            inner = client.get("client") if isinstance(client.get("client"), dict) else client
+            tg = None
+            if isinstance(inner, dict):
+                tg = inner.get("tgId")
+            if tg is None and isinstance(client, dict):
+                tg = client.get("tgId")
+            if tg is not None:
+                return str(tg) == str(telegram_id)
+            # tg missing — fallback to list check (hydrate not needed for ownership,
+            # but reuses existing method)
+            try:
+                clients = await VPNPanelService.get_clients_by_telegram_id(telegram_id)
+                return any(c.get("email") == email for c in clients)
+            except VPNPanelError:
+                return False
+    except VPNPanelError:
+        return False
+    except Exception:
+        return False
+    return False
 
 
 async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -75,8 +133,14 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(blocked, parse_mode="HTML")
         return
 
+    # --- IDOR fix: ensure email belongs to caller before any renewal logic ---
+    if not await _is_renewal_owned(email, user.id):
+        log.warning("Renewal IDOR blocked: user %s tried to renew %s", user.id, email)
+        await query.message.reply_text("⛔ این اشتراک متعلق به شما نیست.", parse_mode="HTML")
+        return
+
     try:
-        package_label, duration_days, data_gb, amount = await _resolve_renewal_terms(email)
+        package_label, duration_days, data_gb, amount = await _resolve_renewal_terms(email, user.id)
     except VPNPanelError as exc:
         log.warning("Could not resolve renewal terms for %s: %s", email, exc)
         await query.message.reply_text(
