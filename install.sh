@@ -145,6 +145,8 @@ collect_missing_vars() {
 
 # Write the env file: preserve existing content (minus lines for rewritten
 # vars), then append the newly collected assignments.
+# Uses dotenv-compatible quoting (single quotes with \' escaping) so both
+# Python dotenv and safe bash loading can parse it without shell execution.
 write_env_file() {
     local had_existing=false
     [[ -f "$ENV_FILE" ]] && had_existing=true
@@ -174,8 +176,20 @@ EOF
     fi
     local v
     for v in "${TO_WRITE[@]}"; do
-        # Use %q to safely escape any value for bash source (handles ", ', $, \, etc.)
-        printf '%s=%q\n' "$v" "${!v}" >> "$tmp_final"
+        local val="${!v}"
+        # Use Python to produce dotenv-compatible single-quoted value
+        local qval
+        qval="$(VAL="$val" python3 <<'PYEOF'
+import os, re
+v = os.environ.get("VAL", "")
+needs_quote = any(c in v for c in " ;$`\"'\\#=") or not v
+if not needs_quote and re.match(r"^[A-Za-z0-9_./:+\-@%=]+$", v):
+    print(v)
+else:
+    print("'" + v.replace("'", "\\'") + "'")
+PYEOF
+)"
+        printf '%s=%s\n' "$v" "$qval" >> "$tmp_final"
     done
 
     mv "$tmp_final" "$ENV_FILE"
@@ -192,17 +206,76 @@ configure_environment() {
             err "Cannot read $ENV_FILE"
             exit 1
         fi
-        # Validate file contains only safe assignments/comments before sourcing (defense-in-depth)
-        if grep -qvE '^[[:space:]]*(#.*|[A-Z_][A-Z0-9_]*=.*)?[[:space:]]*$' "$ENV_FILE" 2>/dev/null; then
-            err "Env file $ENV_FILE contains invalid lines — refusing to source."
-            grep -n -vE '^[[:space:]]*(#.*|[A-Z_][A-Z0-9_]*=.*)?[[:space:]]*$' "$ENV_FILE" >&2 || true
+        # Safe load: never source raw file (prevents VAR='a'; rm -rf / injection).
+        # Parse via Python (dotenv if available, else manual) and source generated safe file.
+        local tmp_export
+        tmp_export="$(mktemp)"
+        local _py="python3"
+        if [[ -x "$INSTALL_DIR/venv/bin/python" ]]; then
+            _py="$INSTALL_DIR/venv/bin/python"
+        fi
+        if ! ENV_FILE="$ENV_FILE" "$_py" > "$tmp_export" <<'PYEOF'
+import os, re, sys, pathlib
+env_path = pathlib.Path(os.environ["ENV_FILE"])
+try:
+    from dotenv import dotenv_values
+    vals = dotenv_values(env_path)
+    if vals is None:
+        vals = {}
+    raw = env_path.read_text(errors="ignore")
+    for i, line in enumerate(raw.splitlines(), 1):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if "=" not in s:
+            print(f"Invalid line {i}: no =", file=sys.stderr)
+            sys.exit(2)
+        k = s.split("=", 1)[0].strip()
+        if not re.match(r"^[A-Z_][A-Z0-9_]*$", k):
+            print(f"Invalid key at line {i}: {k}", file=sys.stderr)
+            sys.exit(2)
+except ImportError:
+    vals = {}
+    raw = pathlib.Path(os.environ["ENV_FILE"]).read_text(errors="ignore")
+    for i, line in enumerate(raw.splitlines(), 1):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if "=" not in s:
+            print(f"Invalid line {i}", file=sys.stderr)
+            sys.exit(2)
+        k, v = s.split("=", 1)
+        k = k.strip()
+        if not re.match(r"^[A-Z_][A-Z0-9_]*$", k):
+            print(f"Invalid key at line {i}: {k}", file=sys.stderr)
+            sys.exit(2)
+        v = v.strip()
+        if v and len(v) >= 2 and v[0] in ("'", '"') and v[-1] == v[0]:
+            inner = v[1:-1]
+            if v[0] == "'":
+                inner = inner.replace("\\'", "'")
+            else:
+                inner = inner.replace("\\\\", "\\").replace('\\"', '"')
+            v = inner
+        vals[k] = v
+import shlex
+for k, v in vals.items():
+    if v is None:
+        continue
+    print(f"{k}={shlex.quote(v)}")
+PYEOF
+        then
+            err "Failed to safely parse $ENV_FILE"
+            cat "$tmp_export" >&2 || true
+            rm -f "$tmp_export"
             exit 1
         fi
         # shellcheck disable=SC1090
         set -a
         # shellcheck disable=SC1091
-        source "$ENV_FILE"
+        source "$tmp_export"
         set +a
+        rm -f "$tmp_export"
     fi
 
     load_var_spec
@@ -598,7 +671,8 @@ EOF
         warn "Service still active after stop; not forcing pkill to avoid DB corruption."
     else
         # Clean up stale lock if no process holds it (flock is advisory, safe to remove)
-        rm -f /tmp/vardenproxybot.lock 2>/dev/null || true
+        # Handles both new /run/lock and legacy /tmp locations
+        rm -f /run/lock/vardenproxybot.lock /tmp/vardenproxybot.lock 2>/dev/null || true
     fi
     systemctl enable "$SERVICE_NAME" >> "$LOG_FILE" 2>&1
     systemctl start "$SERVICE_NAME" >> "$LOG_FILE" 2>&1

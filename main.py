@@ -138,14 +138,65 @@ def main():
         log.error("BOT_TOKEN is not set in .env")
         return
 
-    # Prevent multiple instances using a file lock (must stay open to hold lock)
-    # Use 600 perms and atexit cleanup; /tmp is world-writable so avoid symlink race via O_CREAT|O_EXCL fallback
-    lock_file = open("/tmp/vardenproxybot.lock", "w")
-    try:
+    # Prevent multiple instances using a file lock — secure against symlink races
+    # Prefer /run/lock (1777 with sticky, safer than /tmp) fallback to /tmp.
+    # Use O_CREAT|O_EXCL|O_NOFOLLOW to avoid following attacker symlinks.
+    lock_file = None
+    lock_path = None
+    for cand in ("/run/lock/vardenproxybot.lock", "/tmp/vardenproxybot.lock"):
+        try:
+            parent = os.path.dirname(cand)
+            if not os.path.isdir(parent):
+                continue
+            # Try atomic create — fails if file/symlink exists
+            try:
+                fd = os.open(cand, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+                lock_file = os.fdopen(fd, "w")
+                lock_path = cand
+                break
+            except FileExistsError:
+                # Exists — open without EXCL but with NOFOLLOW to avoid symlink
+                try:
+                    fd = os.open(cand, os.O_RDWR | os.O_NOFOLLOW)
+                    # Verify not a symlink via lstat (defense in depth)
+                    st = os.lstat(cand)
+                    import stat as _stat
+
+                    if _stat.S_ISLNK(st.st_mode):
+                        raise OSError("lock is symlink")
+                    # Ensure 600 perms
+                    with contextlib.suppress(Exception):
+                        os.fchmod(fd, 0o600)
+                    lock_file = os.fdopen(fd, "w")
+                    lock_path = cand
+                    break
+                except OSError as e:
+                    # Symlink or not accessible — remove stale symlink if we can and retry once
+                    if "symlink" in str(e).lower() or "loop" in str(e).lower():
+                        with contextlib.suppress(Exception):
+                            os.unlink(cand)
+                        try:
+                            fd = os.open(cand, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+                            lock_file = os.fdopen(fd, "w")
+                            lock_path = cand
+                            break
+                        except OSError:
+                            continue
+                    continue
+            except OSError:
+                continue
+        except OSError:
+            continue
+    if lock_file is None:
+        # Last resort fallback (should not happen) — unsafe but better than no lock
+        log.warning("Secure lock creation failed, falling back to /tmp")
+        lock_file = open("/tmp/vardenproxybot.lock", "w")
+        lock_path = "/tmp/vardenproxybot.lock"
         with contextlib.suppress(Exception):
-            os.chmod(lock_file.fileno(), 0o600)
-    except Exception:
-        pass
+            os.fchmod(lock_file.fileno(), 0o600)
+    else:
+        with contextlib.suppress(Exception):
+            os.fchmod(lock_file.fileno(), 0o600)
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -153,6 +204,7 @@ def main():
         with contextlib.suppress(Exception):
             lock_file.close()
         return
+
     # Ensure lock is released on exit
     def _release_lock():
         with contextlib.suppress(Exception):
@@ -226,6 +278,8 @@ def main():
             fcntl.flock(lock_file, fcntl.LOCK_UN)
         with contextlib.suppress(Exception):
             lock_file.close()
+        # Do not unlink lock file — flock is released, file stays for next run
+        # (unlinking while another waiter holds flock would be racy)
 
 
 if __name__ == "__main__":

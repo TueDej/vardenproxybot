@@ -26,10 +26,10 @@ function escapeAttr(s) {
   return String(s).replace(/['"\\]/g, (c) => ({ "'": "&#39;", '"': "&quot;", "\\": "&#92;" }[c]));
 }
 async function fetchJSON(url, opts = {}) {
-  const res = await fetch(url, { credentials: "include", ...opts });
+  const headers = { "X-Requested-With": "XMLHttpRequest", ...(opts.headers || {}) };
+  const res = await fetch(url, { credentials: "include", headers, ...opts });
   if (res.status === 401) {
-    document.body.innerHTML =
-      '<div style="padding:40px;text-align:center"><h2>401 Unauthorized</h2><p>Check ADMIN_PANEL_USER/PASS in .env</p></div>';
+    window.location.href = "/admin/login";
     throw new Error("auth");
   }
   if (!res.ok) throw new Error(await res.text());
@@ -362,10 +362,11 @@ $("#pkg-save")?.addEventListener("click", async () => {
   try {
     const res = await fetch("/admin/api/packages", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
       credentials: "include",
       body: JSON.stringify(payload),
     });
+    if (res.status === 401) { window.location.href = "/admin/login"; throw new Error("auth"); }
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     packagesState = cloneState(data);

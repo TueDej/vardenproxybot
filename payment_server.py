@@ -5,11 +5,12 @@ TLS on the public domain and forwards here.
 """
 
 import asyncio
-import base64
 import collections
 import hmac
+import ipaddress
 import logging
 import pathlib
+import secrets
 import time
 
 try:
@@ -55,31 +56,165 @@ def _page(title: str, body: str) -> web.Response:
     )
 
 
-# ── BasicAuth helpers ───────────────────────────────────────────────
+# ── Session-based admin auth (replaces BasicAuth) ──────────────────
+
+# In-memory session store: token -> expiry monotonic
+_admin_sessions: dict[str, float] = {}
+_admin_sessions_lock = asyncio.Lock()
+_ADMIN_SESSION_TTL = 7 * 24 * 3600  # 7 days
+_ADMIN_COOKIE_NAME = "admin_session"
 
 
-def _is_admin_authenticated(request: web.Request) -> bool:
-    if not config.admin_panel_enabled:
-        return False
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Basic "):
+def _is_trusted_proxy(remote: str | None) -> bool:
+    if not remote:
         return False
     try:
-        decoded = base64.b64decode(auth[6:].strip()).decode("utf-8", errors="strict")
-    except Exception:
+        ip = ipaddress.ip_address(remote)
+        return ip.is_loopback
+    except ValueError:
         return False
-    if ":" not in decoded:
+
+
+def _check_admin_credentials(user: str, pwd: str) -> bool:
+    if not config.admin_panel_enabled:
         return False
-    user, pwd = decoded.split(":", 1)
-    # constant-time compare
     user_ok = hmac.compare_digest(user, config.admin_panel_user)
     pass_ok = hmac.compare_digest(pwd, config.admin_panel_pass)
     return user_ok and pass_ok
 
 
-def _admin_auth_required_response() -> web.Response:
-    headers = {"WWW-Authenticate": 'Basic realm="Varden Admin"'}
-    return web.Response(status=401, text="Authentication required", headers=headers)
+async def _create_admin_session() -> str:
+    token = secrets.token_urlsafe(32)
+    expiry = time.monotonic() + _ADMIN_SESSION_TTL
+    async with _admin_sessions_lock:
+        _admin_sessions[token] = expiry
+        # periodic cleanup: drop expired if table grows
+        if len(_admin_sessions) > 500:
+            now = time.monotonic()
+            for k, exp in list(_admin_sessions.items()):
+                if exp <= now:
+                    _admin_sessions.pop(k, None)
+    return token
+
+
+async def _is_admin_authenticated(request: web.Request) -> bool:
+    if not config.admin_panel_enabled:
+        return False
+    token = request.cookies.get(_ADMIN_COOKIE_NAME)
+    if not token:
+        return False
+    async with _admin_sessions_lock:
+        exp = _admin_sessions.get(token)
+        if exp is None:
+            return False
+        if exp <= time.monotonic():
+            _admin_sessions.pop(token, None)
+            return False
+        # sliding expiry: refresh on activity
+        _admin_sessions[token] = time.monotonic() + _ADMIN_SESSION_TTL
+        return True
+
+
+async def _destroy_admin_session(request: web.Request) -> None:
+    token = request.cookies.get(_ADMIN_COOKIE_NAME)
+    if token:
+        async with _admin_sessions_lock:
+            _admin_sessions.pop(token, None)
+
+
+def _admin_login_page(error: str | None = None) -> web.Response:
+    err_html = f'<div class="error">{escape(error)}</div>' if error else ""
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varden Admin — Login</title>
+<link rel="stylesheet" href="/admin/static/style.css">
+<style>
+.login-wrap{{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0e1411;padding:20px}}
+.login-card{{background:#16201b;border:1px solid #25352c;border-radius:16px;padding:28px;width:100%;max-width:380px;box-shadow:0 4px 16px rgba(0,0,0,0.35)}}
+.login-card h1{{margin:0 0 6px;font-size:22px;color:#dff0e3}}
+.login-card .muted{{margin-bottom:18px}}
+.login-card label{{display:block;margin:12px 0 4px;color:#8aa098;font-size:13px}}
+.login-card input{{width:100%;padding:10px 12px;background:#0f1f18;border:1px solid #25352c;border-radius:10px;color:#dff0e3;font-size:14px;outline:none;box-sizing:border-box}}
+.login-card input:focus{{border-color:#478061}}
+.login-card .btn{{width:100%;margin-top:18px}}
+.error{{background:rgba(220,90,90,0.14);border:1px solid rgba(220,90,90,0.22);color:#e07a7a;padding:8px 12px;border-radius:10px;margin-bottom:12px;font-size:13px}}
+</style></head>
+<body><div class="login-wrap"><form class="login-card" method="POST" action="/admin/login">
+<h1>Varden<span style="color:#5fb68a">Admin</span></h1>
+<div class="muted">Sign in to continue</div>
+{err_html}
+<label>Username</label><input name="username" autocomplete="username" required>
+<label>Password</label><input name="password" type="password" autocomplete="current-password" required>
+<button class="btn primary" type="submit">Sign in</button>
+</form></div></body></html>"""
+    return web.Response(text=html, content_type="text/html")
+
+
+async def handle_admin_login_get(request: web.Request) -> web.Response:
+    if not config.admin_panel_enabled:
+        return web.Response(status=503, text="Admin panel not configured")
+    if await _is_admin_authenticated(request):
+        raise web.HTTPFound("/admin/")
+    return _admin_login_page()
+
+
+async def handle_admin_login_post(request: web.Request) -> web.Response:
+    if not config.admin_panel_enabled:
+        return web.Response(status=503, text="Admin panel not configured")
+    # Rate-limit is already applied via middleware (60/min per IP on /admin)
+    # Parse form data (supports both x-www-form-urlencoded and json)
+    username = ""
+    password = ""
+    ctype = request.headers.get("Content-Type", "")
+    if "application/json" in ctype:
+        try:
+            data = await request.json()
+            username = str(data.get("username", "")).strip()
+            password = str(data.get("password", ""))
+        except Exception:
+            pass
+    else:
+        try:
+            data = await request.post()
+            username = str(data.get("username", "")).strip()
+            password = str(data.get("password", ""))
+        except Exception:
+            pass
+    if not _check_admin_credentials(username, password):
+        # Generic error to avoid user enumeration
+        return _admin_login_page(error="Invalid username or password")
+    token = await _create_admin_session()
+    # Determine Secure flag: proxy terminates TLS, check X-Forwarded-Proto
+    secure = False
+    try:
+        xf_proto = request.headers.get("X-Forwarded-Proto", "")
+        if xf_proto == "https" or request.scheme == "https":
+            secure = True
+    except Exception:
+        pass
+    # Set cookie — SameSite=Lax blocks most CSRF, HttpOnly prevents JS theft
+    resp = web.HTTPFound("/admin/")
+    # Build cookie header manually to support SameSite attribute reliably
+    cookie_val = f"{_ADMIN_COOKIE_NAME}={token}; Path=/admin/; HttpOnly; SameSite=Lax"
+    if secure:
+        cookie_val += "; Secure"
+    # 7 days
+    cookie_val += f"; Max-Age={_ADMIN_SESSION_TTL}"
+    resp.headers.add("Set-Cookie", cookie_val)
+    # Also set for API compatibility: allow /admin/api with same cookie path
+    return resp
+
+
+async def handle_admin_logout(request: web.Request) -> web.Response:
+    await _destroy_admin_session(request)
+    resp = web.HTTPFound("/admin/login")
+    # Clear cookie
+    resp.headers.add(
+        "Set-Cookie",
+        f"{_ADMIN_COOKIE_NAME}=; Path=/admin/; HttpOnly; SameSite=Lax; Max-Age=0",
+    )
+    return resp
 
 
 # ── Rate limit (in-memory, per-IP sliding window) ─────────────────
@@ -97,13 +232,25 @@ _rate_lock = asyncio.Lock()
 
 
 def _client_ip(request: web.Request) -> str:
-    # Caddy sets X-Forwarded-For; trust first entry when behind proxy
-    xff = request.headers.get("X-Forwarded-For", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    # Fallback to peer
-    peer = request.remote or "unknown"
-    return peer
+    # Only trust X-Forwarded-For when request comes from a trusted proxy (loopback).
+    # The server binds to 127.0.0.1 behind Caddy/nginx; direct public access has
+    # remote == client IP and must not be spoofable via XFF header.
+    # Use the *last* XFF entry when trusted: proxy appends client IP, first entry
+    # is attacker-controllable, last is proxy-added real IP.
+    remote = request.remote or "unknown"
+    if _is_trusted_proxy(remote):
+        xff = request.headers.get("X-Forwarded-For", "")
+        if xff:
+            # Take last entry (rightmost) for spoof resistance with appending proxies
+            candidate = xff.split(",")[-1].strip()
+            if candidate:
+                try:
+                    ipaddress.ip_address(candidate)
+                    return candidate
+                except ValueError:
+                    # Invalid XFF entry — fall back to remote (proxy IP)
+                    pass
+    return remote
 
 
 def _rate_key(request: web.Request) -> str | None:
@@ -157,13 +304,63 @@ async def rate_limit_middleware(request: web.Request, handler):
 
 @web.middleware
 async def admin_auth_middleware(request: web.Request, handler):
-    if request.path == ADMIN_PREFIX or request.path.startswith(ADMIN_PREFIX + "/"):
+    path = request.path
+    # Public endpoints: login page and static assets must be reachable without auth
+    if path == "/admin/login" or path.startswith("/admin/login/"):
+        return await handler(request)
+    if path.startswith("/admin/static/"):
+        return await handler(request)
+    if path == ADMIN_PREFIX or path.startswith(ADMIN_PREFIX + "/"):
         if not config.admin_panel_enabled:
             return web.Response(
                 status=503, text="Admin panel not configured (ADMIN_PANEL_USER/PASS missing)"
             )
-        if not _is_admin_authenticated(request):
-            return _admin_auth_required_response()
+        # CSRF protection for state-changing admin API calls
+        if request.method == "POST" and path.startswith(ADMIN_PREFIX + "/api/"):
+            # Require AJAX marker header (fetch) — browser form POST from attacker origin cannot set this
+            # Also enforce SameSite via cookie, but extra header blocks simple CSRF
+            xrw = request.headers.get("X-Requested-With", "")
+            sec_fetch_site = request.headers.get("Sec-Fetch-Site", "")
+            origin = request.headers.get("Origin", "")
+            # Allow if X-Requested-With == XMLHttpRequest, or Sec-Fetch-Site == same-origin, or Origin matches host
+            allowed_csrf = False
+            if xrw == "XMLHttpRequest":
+                allowed_csrf = True
+            elif sec_fetch_site == "same-origin":
+                allowed_csrf = True
+            elif origin:
+                # Validate Origin host matches request host
+                try:
+                    from urllib.parse import urlsplit
+
+                    o_host = urlsplit(origin).netloc
+                    req_host = request.headers.get("Host", "")
+                    if o_host and req_host and o_host == req_host:
+                        allowed_csrf = True
+                except Exception:
+                    pass
+            if not allowed_csrf:
+                # For fetch-based API, missing header means likely CSRF — block
+                # Still allow if Referer is same-origin as fallback
+                referer = request.headers.get("Referer", "")
+                if referer:
+                    try:
+                        from urllib.parse import urlsplit
+
+                        r_host = urlsplit(referer).netloc
+                        req_host = request.headers.get("Host", "")
+                        if r_host and req_host and r_host == req_host:
+                            allowed_csrf = True
+                    except Exception:
+                        pass
+            if not allowed_csrf:
+                return web.json_response({"error": "CSRF check failed"}, status=403)
+        if not await _is_admin_authenticated(request):
+            # For API callers, return JSON 401 so fetch can redirect to login
+            if path.startswith(ADMIN_PREFIX + "/api/"):
+                return web.json_response({"error": "Authentication required"}, status=401)
+            # For browser navigation, redirect to login page
+            raise web.HTTPFound("/admin/login")
     return await handler(request)
 
 
@@ -739,7 +936,11 @@ def build_app(application) -> web.Application:
     app.router.add_get(CALLBACK_PATH, handle_zarinpal_callback)
     app.router.add_get("/zarinpal/start/{authority}", handle_zarinpal_start)
     app.router.add_get("/healthz", handle_health)
-    # Admin panel (protected by BasicAuth middleware)
+    # Admin panel — login is public, rest is session-protected
+    app.router.add_get("/admin/login", handle_admin_login_get)
+    app.router.add_post("/admin/login", handle_admin_login_post)
+    app.router.add_get("/admin/logout", handle_admin_logout)
+    app.router.add_post("/admin/logout", handle_admin_logout)
     app.router.add_get(ADMIN_PREFIX, handle_admin_index)
     app.router.add_get(ADMIN_PREFIX + "/", handle_admin_index)
     app.router.add_get(ADMIN_PREFIX + "/api/stats", handle_admin_stats)
@@ -747,7 +948,7 @@ def build_app(application) -> web.Application:
     app.router.add_get(ADMIN_PREFIX + "/api/users", handle_admin_users)
     app.router.add_get(ADMIN_PREFIX + "/api/packages", handle_admin_packages_get)
     app.router.add_post(ADMIN_PREFIX + "/api/packages", handle_admin_packages_save)
-    # Static files for admin UI
+    # Static files for admin UI (public for login page styling)
     static_dir = _admin_static_dir()
     if static_dir.exists():
         app.router.add_static(ADMIN_PREFIX + "/static/", path=static_dir, name="admin_static")
