@@ -275,17 +275,31 @@ pre_flight() {
 # ─── 3. Deploy source ────────────────────────────────────────────────────
 
 prompt_db_wipe() {
-    # Offer to wipe existing DB files with double confirmation. Returns 0 if wiped, 1 if kept.
-    if [[ ${#DB_FILES[@]} -eq 0 ]]; then
+    # Offer to wipe existing DB with double confirmation. Returns 0 if wiped, 1 if kept.
+    # Handles sqlite files (DB_FILES) and postgres DB (PG_DB_NAME/PG_DB_EXISTS).
+    local has_db=false
+    [[ ${#DB_FILES[@]} -gt 0 ]] && has_db=true
+    [[ "$PG_DB_EXISTS" == true ]] && has_db=true
+    if [[ "$has_db" != true ]]; then
         return 1
     fi
     # Allow non-interactive opt-in via env: VARDEN_WIPE_DB=1
     if [[ "${VARDEN_WIPE_DB:-}" == "1" || "${VARDEN_WIPE_DB:-}" == "true" ]]; then
-        warn "VARDEN_WIPE_DB is set — removing ${#DB_FILES[@]} database file(s) without prompt."
+        if [[ ${#DB_FILES[@]} -gt 0 ]]; then
+            warn "VARDEN_WIPE_DB is set — removing ${#DB_FILES[@]} database file(s) without prompt."
+        fi
+        if [[ "$PG_DB_EXISTS" == true ]]; then
+            warn "VARDEN_WIPE_DB is set — dropping Postgres DB $PG_DB_NAME without prompt."
+        fi
         return 0
     fi
     if ! is_interactive; then
-        info "Keeping existing database file(s) (${#DB_FILES[@]} found) — non-interactive mode."
+        if [[ ${#DB_FILES[@]} -gt 0 ]]; then
+            info "Keeping existing database file(s) (${#DB_FILES[@]} found) — non-interactive mode."
+        fi
+        if [[ "$PG_DB_EXISTS" == true ]]; then
+            info "Keeping existing Postgres DB $PG_DB_NAME — non-interactive mode."
+        fi
         return 1
     fi
     echo ""
@@ -294,9 +308,18 @@ prompt_db_wipe() {
         size=$(du -h "$db" 2>/dev/null | cut -f1)
         echo -e "    ${DIM}$db (${size:-?})${NC}"
     done
+    if [[ "$PG_DB_EXISTS" == true ]]; then
+        echo -e "    ${DIM}Postgres DB: $PG_DB_NAME${NC}"
+    fi
     echo ""
+    local prompt="  Remove all current DB and start fresh? (yes/no) [no]: "
+    if [[ ${#DB_FILES[@]} -gt 0 && "$PG_DB_EXISTS" == true ]]; then
+        prompt="  Remove all current DB files + Postgres DB $PG_DB_NAME and start fresh? (yes/no) [no]: "
+    elif [[ "$PG_DB_EXISTS" == true ]]; then
+        prompt="  Drop Postgres DB $PG_DB_NAME and start fresh? (yes/no) [no]: "
+    fi
     local ans1 ans2
-    read -rp "  Remove all current DB files and start fresh? (yes/no) [no]: " ans1 || ans1=""
+    read -rp "$prompt" ans1 || ans1=""
     ans1=$(echo "$ans1" | tr '[:upper:]' '[:lower:]' | xargs 2>/dev/null || echo "$ans1")
     if [[ "$ans1" != "yes" && "$ans1" != "y" ]]; then
         info "Keeping existing database."
@@ -350,6 +373,23 @@ deploy_source() {
         fi
     fi
 
+    # Postgres detection (for wipe prompt)
+    PG_DB_NAME=""
+    PG_DB_EXISTS=false
+    if [[ -n "${DATABASE_URL:-}" && "$DATABASE_URL" == postgresql* ]]; then
+        _pg_db="${DATABASE_URL%%\?*}"
+        _pg_db="${_pg_db##*/}"
+        _pg_db="${_pg_db%%/*}"
+        if [[ -n "$_pg_db" ]]; then
+            PG_DB_NAME="$_pg_db"
+            # Check existence via local postgres (most common on VPS). Fallback to no check.
+            if sudo -u postgres psql -lqt 2>/dev/null | awk -F\| '{print $1}' | grep -qw "$PG_DB_NAME"; then
+                PG_DB_EXISTS=true
+                info "Found Postgres DB: $PG_DB_NAME"
+            fi
+        fi
+    fi
+
     WIPE_DB=false
     if prompt_db_wipe; then
         WIPE_DB=true
@@ -359,8 +399,33 @@ deploy_source() {
             # Also remove WAL/SHM sidecars if present
             rm -f "${db}-wal" "${db}-shm" 2>/dev/null || true
         done
-        log "Removed ${#DB_FILES[@]} database file(s) — fresh start."
+        if [[ ${#DB_FILES[@]} -gt 0 ]]; then
+            log "Removed ${#DB_FILES[@]} database file(s) — fresh start."
+        fi
         DB_FILES=()
+        # Postgres wipe: drop and recreate
+        if [[ "$PG_DB_EXISTS" == true && -n "$PG_DB_NAME" ]]; then
+            # Terminate connections first to allow DROP
+            sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$PG_DB_NAME' AND pid <> pg_backend_pid();" >/dev/null 2>&1 || true
+            if sudo -u postgres psql -c "DROP DATABASE \"$PG_DB_NAME\";" >/dev/null 2>&1; then
+                # Recreate with original owner if we can parse it, else postgres
+                _pg_owner="$(echo "$DATABASE_URL" | sed -nE 's|.*://([^:/?#]+).*|\1|p')"
+                if [[ -n "$_pg_owner" && "$_pg_owner" != "postgres" ]]; then
+                    if sudo -u postgres psql -c "CREATE DATABASE \"$PG_DB_NAME\" OWNER \"$_pg_owner\";" >/dev/null 2>&1; then
+                        log "Dropped and recreated Postgres DB $PG_DB_NAME (owner $_pg_owner) — fresh start."
+                    else
+                        sudo -u postgres psql -c "CREATE DATABASE \"$PG_DB_NAME\";" >/dev/null 2>&1
+                        log "Dropped and recreated Postgres DB $PG_DB_NAME — fresh start."
+                    fi
+                else
+                    sudo -u postgres psql -c "CREATE DATABASE \"$PG_DB_NAME\";" >/dev/null 2>&1
+                    log "Dropped and recreated Postgres DB $PG_DB_NAME — fresh start."
+                fi
+                PG_DB_EXISTS=false
+            else
+                warn "Could not drop Postgres DB $PG_DB_NAME (maybe in use). Try: sudo -u postgres psql -c \"DROP DATABASE \\\"$PG_DB_NAME\\\"\";"
+            fi
+        fi
     elif [[ ${#DB_FILES[@]} -gt 0 ]]; then
         BACKUP_DIR="$(mktemp -d /tmp/vardenproxybot_db_backup_XXXXXX)"
         chmod 700 "$BACKUP_DIR" 2>/dev/null || true
