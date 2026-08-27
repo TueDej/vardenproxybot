@@ -6,6 +6,7 @@ TLS on the public domain and forwards here.
 
 import asyncio
 import collections
+import contextlib
 import hmac
 import ipaddress
 import logging
@@ -28,7 +29,13 @@ from sqlalchemy.orm import selectinload
 
 from config import config
 from database import async_session
-from handlers.buy import OrderAlreadyApproved, OrderNotApprovable, verify_and_fulfill_order
+from handlers.buy import (
+    OrderAlreadyApproved,
+    OrderNotApprovable,
+    expire_pending_orders,
+    is_order_expired,
+    verify_and_fulfill_order,
+)
 from keyboards import main_menu_keyboard
 from models import Order, User
 from vpn_service import VPNPanelError
@@ -215,6 +222,25 @@ async def handle_admin_logout(request: web.Request) -> web.Response:
         f"{_ADMIN_COOKIE_NAME}=; Path=/admin/; HttpOnly; SameSite=Lax; Max-Age=0",
     )
     return resp
+
+
+# ── Auto-expire pending orders (15-min payment window) ────────────
+
+_expire_task: asyncio.Task | None = None
+
+
+async def _auto_expire_loop() -> None:
+    while True:
+        await asyncio.sleep(60)
+        try:
+            async with async_session() as session:
+                count = await expire_pending_orders(session)
+                if count:
+                    log.info("Auto-expired %s pending orders (15-min window)", count)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            log.warning("Auto-expire tick failed", exc_info=True)
 
 
 # ── Rate limit (in-memory, per-IP sliding window) ─────────────────
@@ -787,6 +813,24 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
                 "قبلاً تأیید شده", "این سفارش قبلاً تأیید و فعال شده است. به ربات برگردید. ✅"
             )
 
+        # 15-min window: expired pending orders are treated as cancelled
+        # and any late payment is reversed asap.
+        if order.status == "pending" and is_order_expired(order):
+            log.info("Order #%s expired (15-min window)", oid)
+            try:
+                order.status = "cancelled"
+                await session.commit()
+            except Exception:
+                pass
+            try:
+                outcome = await verify_payment(order.payment_authority, order.amount_toomans)
+            except ZarinpalError:
+                return _page(
+                    "لینک منقضی شده ⏰",
+                    "این لینک پرداخت پس از 15 دقیقه منقضی شده است. لطفاً سفارش جدیدی ثبت کنید.",
+                )
+            return await _paid_cancelled_flow(application, session, order, authority, outcome)
+
         if order.status != "pending":
             # Cancelled/rejected before the money landed. The StartPay link
             # itself can't be revoked, so check whether the user paid anyway
@@ -908,6 +952,16 @@ async def handle_zarinpal_start(request: web.Request) -> web.Response:
         if order is None:
             log.warning("Start page for unknown authority (len=%d)", len(authority))
             return _page("سفارش یافت نشد", "سفارشی برای این پرداخت پیدا نشد.")
+        if order.status == "pending" and is_order_expired(order):
+            try:
+                order.status = "cancelled"
+                await session.commit()
+            except Exception:
+                pass
+            return _page(
+                "لینک منقضی شده ⏰",
+                "این لینک پرداخت پس از 15 دقیقه منقضی شده است. لطفاً سفارش جدیدی ثبت کنید.",
+            )
         if order.status != "pending":
             if order.status == "approved":
                 return _page("قبلاً پرداخت شده", "این سفارش قبلاً پرداخت و فعال شده است.")
@@ -957,16 +1011,21 @@ def build_app(application) -> web.Application:
 
 async def start_payment_server(application) -> web.AppRunner:
     """Run the callback listener until the returned runner is cleaned up."""
+    global _expire_task
     runner = web.AppRunner(build_app(application))
     await runner.setup()
     site = web.TCPSite(runner, config.zarinpal_bind_host, config.zarinpal_bind_port)
     await site.start()
+    # Start 15-min expiry background loop (runs every 60s)
+    if _expire_task is None or _expire_task.done():
+        _expire_task = asyncio.create_task(_auto_expire_loop())
     log.info(
         "Payment callback listening on http://%s:%s%s",
         config.zarinpal_bind_host,
         config.zarinpal_bind_port,
         CALLBACK_PATH,
     )
+    log.info("Payment expiry: pending orders auto-cancel after 15 minutes")
     if config.admin_panel_enabled:
         log.info(
             "Admin panel at http://%s:%s%s (user=%s)",
@@ -981,4 +1040,10 @@ async def start_payment_server(application) -> web.AppRunner:
 
 
 async def stop_payment_server(runner: web.AppRunner) -> None:
+    global _expire_task
+    if _expire_task is not None:
+        _expire_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await _expire_task
+        _expire_task = None
     await runner.cleanup()

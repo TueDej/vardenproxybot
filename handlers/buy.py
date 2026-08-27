@@ -1,6 +1,14 @@
 import logging
 from html import escape
 
+try:
+    from datetime import UTC
+except ImportError:  # Python <3.11
+    from datetime import timezone
+
+    UTC = timezone.utc  # type: ignore[no-redef]  # noqa: UP017
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +31,35 @@ from vpn_service import VPNPanelError, VPNPanelService
 from zarinpal import ZarinpalError, request_payment, verify_payment
 
 log = logging.getLogger(__name__)
+
+PAYMENT_EXPIRY_SECONDS = 15 * 60  # 15 minutes
+
+
+def is_order_expired(order) -> bool:
+    """Return True if a pending order's payment window has elapsed."""
+    if not getattr(order, "created_at", None):
+        return False
+    created = order.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    try:
+        return (datetime.now(UTC) - created).total_seconds() > PAYMENT_EXPIRY_SECONDS
+    except Exception:
+        return False
+
+
+async def expire_pending_orders(session) -> int:
+    """Cancel all pending orders older than PAYMENT_EXPIRY_SECONDS. Returns count."""
+    from datetime import timedelta
+
+    cutoff = datetime.now(UTC) - timedelta(seconds=PAYMENT_EXPIRY_SECONDS)
+    result = await session.execute(
+        sa_update(Order)
+        .where(Order.status == "pending", Order.created_at < cutoff)
+        .values(status="cancelled")
+    )
+    await session.commit()
+    return result.rowcount or 0
 
 
 # Lookup map for text-based package selection — refreshed dynamically via packages.load_packages()
@@ -210,7 +247,8 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💰 مبلغ: <b>{pkg['price']:,} تومان</b>\n\n"
         f"{separator}\n"
         "برای پرداخت امن، روی دکمه زیر بزنید و پرداخت را در <b>درگاه زرین‌پال</b> انجام دهید.\n"
-        "✅ بلافاصله پس از پرداخت، اشتراک شما به‌صورت خودکار فعال می‌شود."
+        "✅ بلافاصله پس از پرداخت، اشتراک شما به‌صورت خودکار فعال می‌شود.\n"
+        "⏰ این لینک پرداخت فقط <b>15 دقیقه</b> معتبر است؛ پس از آن سفارش به‌صورت خودکار لغو می‌شود."
     )
     if is_admin:
         gateway_text += "\n\n🔧 <i>ادمین:</i> می‌توانید بدون پرداخت، اشتراک را به‌صورت رایگان تأیید کنید."
@@ -228,17 +266,48 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id if update.effective_user else None
     order_id = context.user_data.get("order_id")
-    if not order_id:
+    order = None
+
+    # Try context first
+    if order_id:
+        async with async_session() as session:
+            result = await session.execute(select(Order).where(Order.id == order_id))
+            order = result.scalar_one_or_none()
+            if not order or order.status != "pending":
+                order = None
+                order_id = None
+
+    # Fallback: latest pending for this user (covers restart / RAM loss / orphan)
+    if order is None and telegram_id:
+        async with async_session() as session:
+            result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+            user = result.scalar_one_or_none()
+            if user:
+                result = await session.execute(
+                    select(Order)
+                    .where(Order.user_id == user.id, Order.status == "pending")
+                    .order_by(Order.created_at.desc())
+                    .limit(1)
+                )
+                order = result.scalar_one_or_none()
+                if order:
+                    order_id = order.id
+
+    if not order_id or not order:
         await update.message.reply_text("❌ سفارش در انتظاری برای لغو وجود ندارد.")
         return
 
     async with async_session() as session:
         result = await session.execute(select(Order).where(Order.id == order_id))
-        order = result.scalar_one_or_none()
-        if order and order.status == "pending":
-            order.status = "cancelled"
+        db_order = result.scalar_one_or_none()
+        if db_order and db_order.status == "pending":
+            db_order.status = "cancelled"
             await session.commit()
+        else:
+            await update.message.reply_text("❌ سفارش در انتظاری برای لغو وجود ندارد.")
+            return
 
     # Best-effort: kill the Zarinpal pay button in chat so the cancelled
     # order can't be paid from a still-visible link.
@@ -383,7 +452,7 @@ async def verify_and_fulfill_order(session, order: Order) -> dict:
         ZarinpalError        — payment not verified (unpaid/cancelled/gateway error)
         OrderAlreadyApproved — another handler claimed it first
         VPNPanelError        — paid, but panel provisioning failed (order stays
-                                pending so a retry can complete it)
+                                 pending so a retry can complete it)
     """
     if not order.payment_authority:
         raise ZarinpalError("Order has no payment authority.")
@@ -391,6 +460,15 @@ async def verify_and_fulfill_order(session, order: Order) -> dict:
         raise OrderAlreadyApproved(order.id)
     if order.status != "pending":
         raise OrderNotApprovable(order.id, order.status)
+    # 15-min payment window: expired pending orders are not fulfillable
+    if is_order_expired(order):
+        # Mark as cancelled so callback's _paid_cancelled_flow can reverse if paid
+        try:
+            order.status = "cancelled"
+            await session.commit()
+        except Exception:
+            pass
+        raise OrderNotApprovable(order.id, "expired")
     outcome = await verify_payment(order.payment_authority, order.amount_toomans)
     if order.renew_email:
         await renew_order(session, order)
