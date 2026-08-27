@@ -161,11 +161,14 @@ class OrderNotApprovable(Exception):
 def purchase_blocked_reason(telegram_id: int) -> str | None:
     """Return a user-facing reason string if this user may not buy right now."""
     # Check maintenance mode (admin toggled via panel) — file-backed, live reload
+    # When payments are paused, only admins may still purchase (new package or
+    # renewal). In sandbox mode this also means only admins can use the
+    # sandbox gateway; normal users are blocked in both cases.
     try:
         import packages as _pkg
 
         _, _, _paused = _pkg.load_packages()
-        if _paused:
+        if _paused and telegram_id not in config.admin_ids:
             return "⏸ سرویس در حال به‌روزرسانی است — لطفاً چند دقیقه بعد دوباره تلاش کنید."
     except Exception:
         pass
@@ -207,12 +210,10 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_cooldown(update.effective_user.id, "buy_start", 5):
         await update.message.reply_text("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید.")
         return
-    is_admin = update.effective_user.id in config.admin_ids
-    if not is_admin:
-        blocked = purchase_blocked_reason(update.effective_user.id)
-        if blocked:
-            await update.message.reply_text(blocked, parse_mode="HTML")
-            return
+    blocked = purchase_blocked_reason(update.effective_user.id)
+    if blocked:
+        await update.message.reply_text(blocked, parse_mode="HTML")
+        return
     context.user_data.clear()
     await update.message.reply_text(
         "🛒 <b>انتخاب پکیج</b>\n\nتمام اشتراک‌ها یک‌ماهه هستند:",
@@ -231,12 +232,10 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید.")
         return
 
-    is_admin = update.effective_user.id in config.admin_ids
-    if not is_admin:
-        blocked = purchase_blocked_reason(update.effective_user.id)
-        if blocked:
-            await update.message.reply_text(blocked, parse_mode="HTML")
-            return
+    blocked = purchase_blocked_reason(update.effective_user.id)
+    if blocked:
+        await update.message.reply_text(blocked, parse_mode="HTML")
+        return
 
     async with async_session() as session:
         user = await get_or_create_user(session, update.effective_user)
@@ -262,6 +261,7 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Build the payment prompt. Non-admins must pay via Zarinpal; admins always
     # get a free-confirm button (see payment_keyboard) and may also pay normally.
+    is_admin = update.effective_user.id in config.admin_ids
     public_url = None
     if not is_admin:
         try:

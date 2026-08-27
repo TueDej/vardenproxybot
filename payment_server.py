@@ -808,14 +808,26 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
         chat_id = order.user.telegram_id
         oid = order.id  # snapshot — failures below may expire ORM attributes
 
-        # Sandbox mode: only admins may pay — defense in depth even if order
-        # was created before sandbox was enabled or via direct DB insert.
+        # Sandbox and maintenance mode: only admins may pay — defense in
+        # depth even if order was created before the flags were enabled.
         if config.zarinpal_sandbox and chat_id not in config.admin_ids:
             log.warning("Sandbox mode: rejecting callback for non-admin order #%s user %s", oid, chat_id)
             return _page(
                 "حالت آزمایشی",
                 "در حالت آزمایشی فقط مدیران امکان پرداخت دارند.",
             )
+        try:
+            import packages as _pkg
+
+            _, _, _paused = _pkg.load_packages()
+            if _paused and chat_id not in config.admin_ids:
+                log.warning("Paused mode: rejecting callback for non-admin order #%s user %s", oid, chat_id)
+                return _page(
+                    "سرویس در حال به‌روزرسانی",
+                    "سرویس در حال به‌روزرسانی است — لطفاً چند دقیقه بعد دوباره تلاش کنید.",
+                )
+        except Exception:
+            pass
 
         if order.status == "approved":
             return _page(
@@ -963,7 +975,7 @@ async def handle_zarinpal_start(request: web.Request) -> web.Response:
         if order is None:
             log.warning("Start page for unknown authority (len=%d)", len(authority))
             return _page("سفارش یافت نشد", "سفارشی برای این پرداخت پیدا نشد.")
-        # Sandbox mode: only admins may access the payment start page
+        # Sandbox and maintenance mode: only admins may access the payment start page
         if config.zarinpal_sandbox and order.user.telegram_id not in config.admin_ids:
             log.warning(
                 "Sandbox mode: rejecting start page for non-admin order #%s user %s",
@@ -974,6 +986,22 @@ async def handle_zarinpal_start(request: web.Request) -> web.Response:
                 "حالت آزمایشی",
                 "در حالت آزمایشی فقط مدیران امکان پرداخت دارند.",
             )
+        try:
+            import packages as _pkg
+
+            _, _, _paused = _pkg.load_packages()
+            if _paused and order.user.telegram_id not in config.admin_ids:
+                log.warning(
+                    "Paused mode: rejecting start page for non-admin order #%s user %s",
+                    order.id,
+                    order.user.telegram_id,
+                )
+                return _page(
+                    "سرویس در حال به‌روزرسانی",
+                    "سرویس در حال به‌روزرسانی است — لطفاً چند دقیقه بعد دوباره تلاش کنید.",
+                )
+        except Exception:
+            pass
         if order.status == "pending" and is_order_expired(order):
             try:
                 order.status = "cancelled"
