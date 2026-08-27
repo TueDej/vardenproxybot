@@ -22,6 +22,7 @@ from handlers.rate_limit import check_cooldown
 from keyboards import (
     cancel_keyboard,
     home_keyboard,
+    main_menu_keyboard,
     packages_keyboard,
     payment_keyboard,
 )
@@ -360,7 +361,10 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     order_id = order.id
 
     if not order_id or not order:
-        await update.message.reply_text("❌ سفارش در انتظاری برای لغو وجود ندارد.")
+        await update.message.reply_text(
+            "❌ سفارش در انتظاری برای لغو وجود ندارد.",
+            reply_markup=main_menu_keyboard(),
+        )
         return
 
     async with async_session() as session:
@@ -370,7 +374,10 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db_order.status = "cancelled"
             await session.commit()
         else:
-            await update.message.reply_text("❌ سفارش در انتظاری برای لغو وجود ندارد.")
+            await update.message.reply_text(
+                "❌ سفارش در انتظاری برای لغو وجود ندارد.",
+                reply_markup=main_menu_keyboard(),
+            )
             return
 
     # Best-effort: kill the Zarinpal pay button in chat so the cancelled

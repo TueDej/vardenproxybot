@@ -29,6 +29,7 @@ from handlers.free import free_confirm_callback
 from handlers.profile import profile
 from handlers.renew import renew_callback
 from handlers.start import help_command, start
+from keyboards import main_menu_keyboard
 from vpn_service import VPNPanelService
 
 log = logging.getLogger(__name__)
@@ -113,8 +114,9 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"❌ سفارش #{ids_str} به‌صورت خودکار <b>لغو</b> شد چون به بخش دیگری رفتید.\n"
                     "💡 اگر مبلغی پرداخت کرده‌اید، به‌صورت خودکار به حساب شما بازگردانده می‌شود.",
                     parse_mode="HTML",
+                    reply_markup=main_menu_keyboard(),
                 )
-                # fall through to handle the new request normally
+                # fall through to handle the new request normally — now on main menu
         except Exception:
             log.warning("pending guard failed", exc_info=True)
 
@@ -139,7 +141,8 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await package_selected(update, context)
         else:
             await update.effective_message.reply_text(
-                "❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید."
+                "❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید.",
+                reply_markup=main_menu_keyboard(),
             )
             return
 
@@ -147,10 +150,11 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🔙 Main Menu" or text == "🏠 Home":
         await start(update, context)
 
-    # Unknown
+    # Unknown — return to home so user is not stuck on cancel-only keyboard
     else:
         await update.effective_message.reply_text(
-            "❓ گزینه نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید."
+            "❓ گزینه نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید.",
+            reply_markup=main_menu_keyboard(),
         )
 
 

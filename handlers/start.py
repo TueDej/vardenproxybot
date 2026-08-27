@@ -33,6 +33,7 @@ async def _abort_pending_if_any(update: Update, context: ContextTypes.DEFAULT_TY
                 f"❌ سفارش #{ids_str} به‌صورت خودکار <b>لغو</b> شد چون به بخش دیگری رفتید.\n"
                 "💡 اگر مبلغی پرداخت کرده‌اید، به‌صورت خودکار به حساب شما بازگردانده می‌شود.",
                 parse_mode="HTML",
+                reply_markup=main_menu_keyboard(),
             )
     except Exception:
         pass
