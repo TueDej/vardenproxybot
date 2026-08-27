@@ -126,3 +126,26 @@ def _migrate_sync(sync_conn) -> None:
                 "ALTER TABLE orders ADD COLUMN discount_code_id INTEGER REFERENCES discount_codes(id) ON DELETE SET NULL",
                 "Added orders.discount_code_id",
             )
+
+    # Telegram user IDs now exceed PostgreSQL INTEGER range (~2.1e9). Promote the
+    # telegram_id columns to BIGINT so lookups/inserts for real users don't fail
+    # with "integer out of range". SQLite stores integers as 64-bit already, so
+    # this is Postgres-only (and the USING clause keeps existing rows intact).
+    if config.database_url.startswith("postgresql"):
+        def _alter_bigint(sql, msg):
+            try:
+                sync_conn.exec_driver_sql(sql)
+                log.info(msg)
+            except Exception:
+                log.warning("Migration step failed: %s", msg, exc_info=True)
+
+        if inspector.has_table("users"):
+            _alter_bigint(
+                "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT USING telegram_id::bigint",
+                "Migrated users.telegram_id -> BIGINT",
+            )
+        if inspector.has_table("discount_codes"):
+            _alter_bigint(
+                "ALTER TABLE discount_codes ALTER COLUMN used_by_telegram_id TYPE BIGINT USING used_by_telegram_id::bigint",
+                "Migrated discount_codes.used_by_telegram_id -> BIGINT",
+            )

@@ -6,7 +6,7 @@ except ImportError:  # Python <3.11
     UTC = timezone.utc  # type: ignore[no-redef]  # noqa: UP017
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -18,7 +18,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     first_name: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -49,7 +49,7 @@ class DiscountCode(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    used_by_telegram_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    used_by_telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     used_order_id: Mapped[int | None] = mapped_column(
         ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
     )
