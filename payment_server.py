@@ -159,25 +159,20 @@ def _admin_login_page(error: str | None = None) -> web.Response:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Varden Admin — Login</title>
 <link rel="stylesheet" href="/admin/static/style.css">
-<style>
-.login-wrap{{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0e1411;padding:20px}}
-.login-card{{background:#16201b;border:1px solid #25352c;border-radius:16px;padding:28px;width:100%;max-width:380px;box-shadow:0 4px 16px rgba(0,0,0,0.35)}}
-.login-card h1{{margin:0 0 6px;font-size:22px;color:#dff0e3}}
-.login-card .muted{{margin-bottom:18px}}
-.login-card label{{display:block;margin:12px 0 4px;color:#8aa098;font-size:13px}}
-.login-card input{{width:100%;padding:10px 12px;background:#0f1f18;border:1px solid #25352c;border-radius:10px;color:#dff0e3;font-size:14px;outline:none;box-sizing:border-box}}
-.login-card input:focus{{border-color:#478061}}
-.login-card .btn{{width:100%;margin-top:18px}}
-.error{{background:rgba(220,90,90,0.14);border:1px solid rgba(220,90,90,0.22);color:#e07a7a;padding:8px 12px;border-radius:10px;margin-bottom:12px;font-size:13px}}
-</style></head>
+</head>
 <body><div class="login-wrap"><form class="login-card" method="POST" action="/admin/login">
-<h1>Varden<span style="color:#5fb68a">Admin</span></h1>
+<div class="login-brand">
+  <div class="brand-logo"><span data-icon="shield-for-security"></span></div>
+  <h1>Varden<span>Admin</span></h1>
+</div>
 <div class="muted">Sign in to continue</div>
 {err_html}
-<label>Username</label><input name="username" autocomplete="username" required>
-<label>Password</label><input name="password" type="password" autocomplete="current-password" required>
-<button class="btn primary" type="submit">Sign in</button>
-</form></div></body></html>"""
+<label class="field">Username<input name="username" autocomplete="username" required></label>
+<label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
+<button class="btn primary block" type="submit">Sign in</button>
+</form></div>
+<script src="/admin/static/icons.js"></script>
+</body></html>"""
     return web.Response(text=html, content_type="text/html")
 
 

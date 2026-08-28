@@ -76,7 +76,7 @@ async function loadOrders() {
   const data = await fetchJSON("/admin/api/orders?" + qs);
   const tbody = $("#orders-body");
   if (!data.items.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="muted">No orders</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9"><div class="empty">${icon("receipt")}<span>No orders</span></div></td></tr>';
   } else {
     tbody.innerHTML = data.items
       .map(
@@ -90,9 +90,9 @@ async function loadOrders() {
         <td>${escapeHtml(o.package_label)}</td>
         <td>${fmtAmount(o.amount_toomans)}</td>
         <td>${pill(o.status)}</td>
-        <td>${o.payment_ref_id ? `<div class="cell-copy"><code>${escapeHtml(o.payment_ref_id)}</code><span class="copy" data-copy="${escapeAttr(o.payment_ref_id)}" onclick="copyText(this.dataset.copy)">copy</span></div>` : '<span class="muted">—</span>'}</td>
-        <td>${o.payment_authority ? `<div class="cell-copy"><code title="${escapeAttr(o.payment_authority)}">${escapeHtml(o.payment_authority)}</code><span class="copy" data-copy="${escapeAttr(o.payment_authority)}" onclick="copyText(this.dataset.copy)">copy</span></div>` : '<span class="muted">—</span>'}</td>
-        <td>${o.panel_email ? `<div class="cell-copy"><code title="${escapeAttr(o.panel_email)}">${escapeHtml(o.panel_email)}</code><span class="copy" data-copy="${escapeAttr(o.panel_email)}" onclick="copyText(this.dataset.copy)">copy</span></div>` : '<span class="muted">—</span>'}</td>
+        <td>${o.payment_ref_id ? `<div class="cell-copy"><code>${escapeHtml(o.payment_ref_id)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(o.payment_ref_id)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></div>` : '<span class="muted">—</span>'}</td>
+        <td>${o.payment_authority ? `<div class="cell-copy"><code title="${escapeAttr(o.payment_authority)}">${escapeHtml(o.payment_authority)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(o.payment_authority)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></div>` : '<span class="muted">—</span>'}</td>
+        <td>${o.panel_email ? `<div class="cell-copy"><code title="${escapeAttr(o.panel_email)}">${escapeHtml(o.panel_email)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(o.panel_email)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></div>` : '<span class="muted">—</span>'}</td>
         <td>${fmtDate(o.created_at)}</td>
       </tr>
     `
@@ -117,7 +117,7 @@ async function loadUsers() {
   const data = await fetchJSON("/admin/api/users?" + qs);
   const tbody = $("#users-body");
   if (!data.items.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="muted">No users</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6"><div class="empty">${icon("users-round")}<span>No users</span></div></td></tr>';
   } else {
     tbody.innerHTML = data.items
       .map(
@@ -141,9 +141,9 @@ function renderPag(kind, total, page, limit) {
   const el = kind === "orders" ? $("#orders-pag") : $("#users-pag");
   const pages = Math.max(1, Math.ceil(total / limit));
   el.innerHTML = `
-    <button ${page <= 1 ? "disabled" : ""} onclick="${kind}Page(${page - 1})">Prev</button>
+    <button ${page <= 1 ? "disabled" : ""} onclick="${kind}Page(${page - 1})">${icon("chevron-left")}<span>Prev</span></button>
     <span class="muted">Page ${page} / ${pages} — ${total} total</span>
-    <button ${page >= pages ? "disabled" : ""} onclick="${kind}Page(${page + 1})">Next</button>
+    <button ${page >= pages ? "disabled" : ""} onclick="${kind}Page(${page + 1})"><span>Next</span>${icon("chevron-right")}</button>
   `;
 }
 window.ordersPage = (n) => {
@@ -158,8 +158,7 @@ window.copyText = (t) => {
   navigator.clipboard.writeText(t).then(() => {
     const el = document.createElement("div");
     el.textContent = "Copied";
-    el.style.cssText =
-      "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#16201b;color:#dff0e3;padding:8px 12px;border-radius:10px;font-size:13px;border:1px solid #25352c";
+    el.className = "toast";
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 900);
   });
@@ -230,12 +229,12 @@ function renderPackages() {
           : `<span>${fmtAmount(price)}</span>`;
       return `
       <tr data-idx="${idx}" draggable="true">
-        <td class="drag-handle" title="Drag to reorder">⋮⋮</td>
+        <td class="drag-handle" title="Drag to reorder">${icon("grip-horizontal")}</td>
         <td><input type="text" data-idx="${idx}" data-field="label" value="${escapeHtml(p.label)}" placeholder="10GB"></td>
         <td><input type="number" data-idx="${idx}" data-field="data_gb" value="${p.data_gb}" min="0" max="10000" step="1"></td>
         <td class="muted">${disc}</td>
         <td>${priceCell}</td>
-        <td><button class="btn" onclick="removePkg(${idx})">✕</button></td>
+        <td><button type="button" class="btn sm" title="Remove" onclick="removePkg(${idx})">${icon("x")}</button></td>
       </tr>
     `;
     })
@@ -409,13 +408,13 @@ $("#pkg-save")?.addEventListener("click", async () => {
     packagesState = cloneState(data);
     originalPackagesState = cloneState(data);
     renderPackages();
-    $("#pkg-msg").textContent = "Saved ✓ — new packages active";
-    $("#pkg-msg").style.color = "#5fb68a";
+    $("#pkg-msg").textContent = "Saved — new packages active";
+    $("#pkg-msg").className = "feedback ok";
     // refresh orders filter packages
     setTimeout(() => (document.querySelector('#package').innerHTML = '<option value="">All packages</option>'), 0);
   } catch (e) {
     $("#pkg-msg").textContent = "Save failed: " + e.message;
-    $("#pkg-msg").style.color = "#e07a7a";
+    $("#pkg-msg").className = "feedback err";
   } finally {
     btn.disabled = false;
     btn.textContent = "Save";
@@ -426,7 +425,7 @@ $("#pkg-discard")?.addEventListener("click", () => {
   packagesState = cloneState(originalPackagesState);
   renderPackages();
   $("#pkg-msg").textContent = "Discarded — reverted to last saved";
-  $("#pkg-msg").style.color = "#8aa098";
+  $("#pkg-msg").className = "feedback muted";
 });
 
 $("#payments-paused")?.addEventListener("change", () => {
@@ -440,7 +439,7 @@ async function loadDiscounts() {
     const data = await fetchJSON("/admin/api/discounts");
     const tbody = $("#discounts-body");
     if (!data.items.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="muted">No discount codes yet</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7"><div class="empty">${icon("label")}<span>No discount codes yet</span></div></td></tr>';
       return;
     }
     tbody.innerHTML = data.items
@@ -453,10 +452,10 @@ async function loadDiscounts() {
         const created = fmtDate(c.created_at);
         const actions = c.is_used
           ? '<span class="muted">—</span>'
-          : `<button class="btn" onclick="deleteDiscount(${c.id})">🗑 Delete</button>`;
+          : `<button type="button" class="btn sm" onclick="deleteDiscount(${c.id})">${icon("trash-bin")}<span>Delete</span></button>`;
         return `
         <tr>
-          <td><code>${escapeHtml(c.code)}</code><span class="copy" data-copy="${escapeAttr(c.code)}" onclick="copyText(this.dataset.copy)">copy</span></td>
+          <td><code>${escapeHtml(c.code)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(c.code)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></td>
           <td>${c.discount_percent}%</td>
           <td>${status}</td>
           <td>${usedBy}</td>
@@ -482,12 +481,12 @@ window.deleteDiscount = async (id) => {
     });
     if (res.status === 401) { window.location.href = "/admin/login"; return; }
     if (!res.ok) throw new Error(await res.text());
-    $("#disc-msg").textContent = "Deleted ✓";
-    $("#disc-msg").style.color = "#5fb68a";
+    $("#disc-msg").textContent = "Deleted";
+    $("#disc-msg").className = "feedback ok";
     loadDiscounts();
   } catch (e) {
     $("#disc-msg").textContent = "Delete failed: " + e.message;
-    $("#disc-msg").style.color = "#e07a7a";
+    $("#disc-msg").className = "feedback err";
   }
 };
 
@@ -495,7 +494,7 @@ $("#disc-generate")?.addEventListener("click", async () => {
   const pct = parseInt($("#disc-pct").value || "0", 10);
   if (!pct || pct < 1 || pct > 100) {
     $("#disc-msg").textContent = "Enter a discount percent between 1 and 100";
-    $("#disc-msg").style.color = "#e07a7a";
+    $("#disc-msg").className = "feedback err";
     return;
   }
   const btn = $("#disc-generate");
@@ -513,11 +512,11 @@ $("#disc-generate")?.addEventListener("click", async () => {
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     $("#disc-msg").textContent = `Generated code ${data.code} (${data.discount_percent}%). Click copy to copy.`;
-    $("#disc-msg").style.color = "#5fb68a";
+    $("#disc-msg").className = "feedback ok";
     loadDiscounts();
   } catch (e) {
     $("#disc-msg").textContent = "Generate failed: " + e.message;
-    $("#disc-msg").style.color = "#e07a7a";
+    $("#disc-msg").className = "feedback err";
   } finally {
     btn.disabled = false;
     btn.textContent = "Generate code";
@@ -545,22 +544,22 @@ async function resolveMsgTarget() {
   const info = $("#msg-target-info");
   const sel = $("#msg-panel-email");
   info.textContent = "";
-  info.style.color = "#8aa098";
+  info.className = "feedback muted";
   // reset email options
   if (sel) {
     sel.innerHTML = '<option value="">— no filter —</option><option value="all">All emails for user</option>';
   }
   if (mode === "single") {
     const tid = $("#msg-target").value.trim();
-    if (!tid) { info.textContent = "Enter Telegram ID"; info.style.color = "#e07a7a"; return; }
+    if (!tid) { info.textContent = "Enter Telegram ID"; info.className = "feedback err"; return; }
     try {
       const data = await fetchJSON(`/admin/api/messages/emails?telegram_id=${encodeURIComponent(tid)}`);
       if (!data.items.length) {
         info.textContent = data.panel_configured === false ? "Panel not configured — no configs" : "User found — no active configs (will send text only)";
-        info.style.color = "#e0b15a";
+        info.className = "feedback warn";
       } else {
         info.textContent = `Found ${data.items.length} config(s): ${data.items.map(c=> c.email + " ("+c.data_label+" "+c.status+")").join(", ")}`;
-        info.style.color = "#5fb68a";
+        info.className = "feedback ok";
         data.items.forEach((c)=>{
           const opt = document.createElement("option");
           opt.value = c.email;
@@ -570,7 +569,7 @@ async function resolveMsgTarget() {
       }
     } catch (e) {
       info.textContent = "Lookup failed: " + e.message;
-      info.style.color = "#e07a7a";
+      info.className = "feedback err";
     }
   } else {
     const q = $("#msg-q").value.trim();
@@ -590,10 +589,10 @@ async function resolveMsgTarget() {
       if (hasApproved) note += " (will filter to those with approved orders on send)";
       note += ` — broadcast with configs limited to 200`;
       info.textContent = note;
-      info.style.color = "#5fb68a";
+      info.className = "feedback ok";
     } catch (e) {
       info.textContent = "Count failed: " + e.message;
-      info.style.color = "#e07a7a";
+      info.className = "feedback err";
     }
   }
 }
@@ -612,19 +611,19 @@ async function previewMsg() {
   let payload = { text_html: text, include_configs: include, panel_email: panelEmail || null };
   if (mode === "single") {
     const tid = $("#msg-target").value.trim();
-    if (!tid) { result.textContent = "Telegram ID required for preview"; result.style.color="#e07a7a"; return; }
+    if (!tid) { result.textContent = "Telegram ID required for preview"; result.className = "feedback err"; return; }
     payload.telegram_id = tid;
   } else {
     result.textContent = "Preview uses single-user sample; for broadcast showing first matched user";
-    result.style.color="#8aa098";
+    result.className = "feedback muted";
     // for broadcast preview, pick first user from search
     const q = $("#msg-q").value.trim();
     try {
       const params = new URLSearchParams(); if(q) params.set("q", q); params.set("limit","1"); params.set("page","1");
       const u = await fetchJSON(`/admin/api/users?`+params.toString());
-      if (!u.items.length) { result.textContent="No user for preview"; result.style.color="#e07a7a"; return; }
+      if (!u.items.length) { result.textContent="No user for preview"; result.className = "feedback err"; return; }
       payload.telegram_id = u.items[0].telegram_id;
-    } catch(e){ result.textContent="Preview user lookup failed: "+e.message; result.style.color="#e07a7a"; return; }
+    } catch(e){ result.textContent="Preview user lookup failed: "+e.message; result.className = "feedback err"; return; }
   }
   const btn = $("#msg-preview"); btn.disabled=true; btn.textContent="Previewing…";
   try {
@@ -639,11 +638,11 @@ async function previewMsg() {
     const data = await res.json();
     box.innerHTML = data.rendered_html || "<i>(empty)</i>";
     box.classList.remove("hidden");
-    result.textContent = "Preview rendered ✓";
-    result.style.color="#5fb68a";
+    result.textContent = "Preview rendered";
+    result.className = "feedback ok";
   } catch(e){
     result.textContent = "Preview failed: "+e.message;
-    result.style.color="#e07a7a";
+    result.className = "feedback err";
   } finally { btn.disabled=false; btn.textContent="Preview"; }
 }
 
@@ -656,13 +655,13 @@ async function sendMsg() {
   const panelEmail = $("#msg-panel-email").value;
   const result = $("#msg-result");
   result.textContent = "";
-  if (!text.trim() && !include) { result.textContent="Provide text or enable configs"; result.style.color="#e07a7a"; return; }
+  if (!text.trim() && !include) { result.textContent="Provide text or enable configs"; result.className = "feedback err"; return; }
   if (!confirm(mode==="single" ? "Send this message?" : "Send broadcast? This will message many users.")) return;
   const btn = $("#msg-send"); btn.disabled=true; btn.textContent="Sending…";
   let payload = { mode, text_html: text, include_configs: include, panel_email: panelEmail || null };
   if (mode==="single") {
     const tid = $("#msg-target").value.trim();
-    if (!tid){ result.textContent="Telegram ID required"; result.style.color="#e07a7a"; btn.disabled=false; btn.textContent="Send"; return; }
+    if (!tid){ result.textContent="Telegram ID required"; result.className = "feedback err"; btn.disabled=false; btn.textContent="Send"; return; }
     payload.telegram_id = tid;
   } else {
     payload.filter = { q: $("#msg-q").value.trim() || undefined, has_approved: $("#msg-has-approved").checked || undefined };
@@ -680,13 +679,13 @@ async function sendMsg() {
     const txt = await res.text();
     let data; try{ data=JSON.parse(txt);} catch{ throw new Error(txt);}
     if (!res.ok) throw new Error(data.error || txt);
-    result.textContent = `Sent ${data.sent}/${data.total} (failed ${data.failed}) ✓ log #${data.log_id}`;
-    result.style.color="#5fb68a";
+    result.textContent = `Sent ${data.sent}/${data.total} (failed ${data.failed}) — log #${data.log_id}`;
+    result.className = "feedback ok";
     loadMessagesLog();
     loadStats();
   } catch(e){
     result.textContent = "Send failed: "+e.message;
-    result.style.color="#e07a7a";
+    result.className = "feedback err";
   } finally { btn.disabled=false; btn.textContent="Send"; }
 }
 
@@ -699,7 +698,7 @@ async function loadMessagesLog(page=1) {
   try {
     const data = await fetchJSON(`/admin/api/messages/log?page=${page}&limit=20`);
     if (!data.items.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="muted">No messages yet</td></tr>';
+      tbody.innerHTML = Y_KEEP;
       if (pag) pag.innerHTML="";
       return;
     }
@@ -709,13 +708,13 @@ async function loadMessagesLog(page=1) {
         <td><span class="pill ${l.kind}">${escapeHtml(l.kind)}</span></td>
         <td><span class="pill ${l.status}">${escapeHtml(l.status)}</span></td>
         <td>${l.filter_json ? escapeHtml(JSON.stringify(l.filter_json).slice(0,60)) : l.panel_email ? escapeHtml(l.panel_email) : "—"} <span class="muted">total ${l.total}</span></td>
-        <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(l.text_html||"—")}</td>
-        <td class="muted">${l.sent}/${l.total} ${l.failed?`❌${l.failed}`:""}</td>
+        <td class="muted col-preview">${escapeHtml(l.text_html||"—")}</td>
+        <td class="muted">${l.sent}/${l.total} ${l.failed?`<span class="text-err">${l.failed} failed</span>`:""}</td>
       </tr>
     `).join("");
     if (pag) {
       const pages = Math.max(1, Math.ceil(data.total / data.limit));
-      pag.innerHTML = `<button ${data.page<=1?"disabled":""} onclick="loadMessagesLog(${data.page-1})">Prev</button><span class="muted">Page ${data.page}/${pages} — ${data.total} total</span><button ${data.page>=pages?"disabled":""} onclick="loadMessagesLog(${data.page+1})">Next</button>`;
+      pag.innerHTML = `<button ${data.page<=1?"disabled":""} onclick="loadMessagesLog(${data.page-1})">${icon("chevron-left")}<span>Prev</span></button><span class="muted">Page ${data.page}/${pages} — ${data.total} total</span><button ${data.page>=pages?"disabled":""} onclick="loadMessagesLog(${data.page+1})"><span>Next</span>${icon("chevron-right")}</button>`;
     }
   } catch(e){
     tbody.innerHTML = `<tr><td colspan="6" class="muted">Failed to load: ${escapeHtml(e.message)}</td></tr>`;
@@ -766,12 +765,12 @@ async function generateSubscription() {
   const label = $("#gen-label").value.trim();
   const result = $("#gen-sub-result");
   result.textContent = "";
-  if (!tid || !/^-?\d+$/.test(tid)) { result.textContent = "Telegram ID required (numeric)"; result.style.color="#e07a7a"; return; }
-  if (dataGbRaw === "" || isNaN(parseInt(dataGbRaw,10))) { result.textContent = "Data GB required"; result.style.color="#e07a7a"; return; }
+  if (!tid || !/^-?\d+$/.test(tid)) { result.textContent = "Telegram ID required (numeric)"; result.className = "feedback err"; return; }
+  if (dataGbRaw === "" || isNaN(parseInt(dataGbRaw,10))) { result.textContent = "Data GB required"; result.className = "feedback err"; return; }
   const data_gb = parseInt(dataGbRaw,10);
   const duration_days = parseInt(durationRaw||"30",10);
-  if (data_gb <0 || data_gb>10000) { result.textContent="data_gb out of range 0..10000"; result.style.color="#e07a7a"; return; }
-  if (duration_days <1 || duration_days>365) { result.textContent="duration 1..365"; result.style.color="#e07a7a"; return; }
+  if (data_gb <0 || data_gb>10000) { result.textContent="data_gb out of range 0..10000"; result.className = "feedback err"; return; }
+  if (duration_days <1 || duration_days>365) { result.textContent="duration 1..365"; result.className = "feedback err"; return; }
   const btn = $("#gen-sub-btn"); btn.disabled=true; btn.textContent="Generating…";
   try {
     const res = await fetch("/admin/api/messages/generate-subscription", {
@@ -784,13 +783,13 @@ async function generateSubscription() {
     const txt = await res.text();
     let data; try{ data=JSON.parse(txt);} catch{ throw new Error(txt); }
     if (!res.ok) throw new Error(data.error || txt);
-    result.textContent = `Generated order #${data.order_id} for ${tid} — ${data.panel_email || ""} ${data.notified ? "✓ notified" : "⚠ not notified: "+(data.notify_error||"")} — ${data.links ? data.links.length+" link(s)" : ""}`;
-    result.style.color="#5fb68a";
+    result.textContent = `Generated order #${data.order_id} for ${tid} — ${data.panel_email || ""} ${data.notified ? "notified" : "not notified: "+(data.notify_error||"")} — ${data.links ? data.links.length+" link(s)" : ""}`;
+    result.className = "feedback ok";
     loadMessagesLog();
     loadStats();
   } catch(e){
     result.textContent = "Generate failed: "+e.message;
-    result.style.color="#e07a7a";
+    result.className = "feedback err";
   } finally { btn.disabled=false; btn.textContent="Generate & Send"; }
 }
 $("#gen-sub-btn")?.addEventListener("click", generateSubscription);

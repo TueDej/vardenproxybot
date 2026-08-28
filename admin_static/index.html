@@ -10,21 +10,24 @@
 <div class="layout">
   <aside class="sidebar">
     <div class="sidebar-brand">
-      <div class="brand-logo">⬢</div>
+      <div class="brand-logo"><span data-icon="shield-for-security"></span></div>
       <div>
         <div class="brand-title">Varden<span>Admin</span></div>
-        <div class="brand-sub muted"><a href="/admin/logout" class="muted" style="color:#8aa098;text-decoration:none">⎋ Logout</a></div>
+        <div class="muted small">VardenProxy control panel</div>
       </div>
     </div>
+
     <nav class="sidebar-nav">
-      <button class="nav-item active" data-tab="orders">Orders</button>
-      <button class="nav-item" data-tab="users">Users</button>
-      <button class="nav-item" data-tab="packages">Packages</button>
-      <button class="nav-item" data-tab="discounts">Discounts</button>
-      <button class="nav-item" data-tab="messages">Messages</button>
+      <button class="nav-item active" data-tab="orders"><span data-icon="receipt"></span>Orders</button>
+      <button class="nav-item" data-tab="users"><span data-icon="users-round"></span>Users</button>
+      <button class="nav-item" data-tab="packages"><span data-icon="cardboard-box-closed"></span>Packages</button>
+      <button class="nav-item" data-tab="discounts"><span data-icon="label"></span>Discounts</button>
+      <button class="nav-item" data-tab="messages"><span data-icon="envelope-mail"></span>Messages</button>
     </nav>
-    <div class="sidebar-footer muted">
+
+    <div class="sidebar-footer">
       <div id="sidebar-stats" class="muted small"></div>
+      <a class="btn sm" href="/admin/logout"><span data-icon="exit"></span>Logout</a>
     </div>
   </aside>
 
@@ -35,16 +38,35 @@
     </header>
 
     <section id="stats" class="stats-grid">
-      <div class="card"><div class="card-label">Total Orders</div><div class="card-value" id="stat-total">—</div></div>
-      <div class="card"><div class="card-label">Pending</div><div class="card-value amber" id="stat-pending">—</div></div>
-      <div class="card"><div class="card-label">Approved</div><div class="card-value emerald" id="stat-approved">—</div></div>
-      <div class="card"><div class="card-label">Revenue</div><div class="card-value" id="stat-revenue">—</div></div>
-      <div class="card"><div class="card-label">Users</div><div class="card-value" id="stat-users">—</div></div>
-      <div class="card"><div class="card-label">Today</div><div class="card-value" id="stat-today">—</div></div>
+      <div class="stat">
+        <div class="stat-icon"><span data-icon="receipt"></span></div>
+        <div class="stat-meta"><div class="stat-label">Total Orders</div><div class="stat-value" id="stat-total">—</div></div>
+      </div>
+      <div class="stat">
+        <div class="stat-icon"><span data-icon="limited-time-clock"></span></div>
+        <div class="stat-meta"><div class="stat-label">Pending</div><div class="stat-value amber" id="stat-pending">—</div></div>
+      </div>
+      <div class="stat">
+        <div class="stat-icon"><span data-icon="circle-check"></span></div>
+        <div class="stat-meta"><div class="stat-label">Approved</div><div class="stat-value emerald" id="stat-approved">—</div></div>
+      </div>
+      <div class="stat">
+        <div class="stat-icon"><span data-icon="budget"></span></div>
+        <div class="stat-meta"><div class="stat-label">Revenue</div><div class="stat-value" id="stat-revenue">—</div></div>
+      </div>
+      <div class="stat">
+        <div class="stat-icon"><span data-icon="users-round"></span></div>
+        <div class="stat-meta"><div class="stat-label">Users</div><div class="stat-value" id="stat-users">—</div></div>
+      </div>
+      <div class="stat">
+        <div class="stat-icon"><span data-icon="calendar"></span></div>
+        <div class="stat-meta"><div class="stat-label">Today</div><div class="stat-value" id="stat-today">—</div></div>
+      </div>
     </section>
 
     <section class="toolbar" id="toolbar-orders">
-      <div class="search-wrap">
+      <div class="search-box">
+        <span data-icon="search-magnifier"></span>
         <input id="q" type="search" placeholder="Search…" autocomplete="off">
       </div>
       <select id="status">
@@ -59,7 +81,7 @@
       </select>
       <input id="from" type="date" title="From">
       <input id="to" type="date" title="To">
-      <button id="apply" class="btn primary">Filter</button>
+      <button id="apply" class="btn primary"><span data-icon="filter-funnel"></span>Filter</button>
       <button id="clear" class="btn">Clear</button>
     </section>
 
@@ -104,13 +126,14 @@
       <div class="pagination" id="users-pag"></div>
     </section>
 
-    <section id="packages-panel" class="panel hidden">
-      <div class="packages-header">
-        <div class="packages-controls">
-          <label>Base price per GB (toman)
+    <section id="packages-panel" class="stack hidden">
+      <div class="card-block">
+        <div class="card-block-title"><span data-icon="budget"></span>Pricing</div>
+        <div class="row">
+          <label class="field">Base price per GB (toman)
             <input id="base-price" type="number" min="1000" max="100000" step="100" placeholder="4500">
           </label>
-          <label>Max volume discount (% at 100GB)
+          <label class="field">Max volume discount (% at 100GB)
             <input id="discount-max" type="number" min="0" max="60" step="1" placeholder="45">
           </label>
           <label class="switch">
@@ -118,157 +141,170 @@
             <span>Block new payments (maintenance)</span>
           </label>
         </div>
-        <div class="muted small" id="discount-hint">Discount: 0% at 10GB → 45% at 100GB (harder curve, selectable). Unlimited is manual price.</div>
+        <div class="hint" id="discount-hint">Discount: 0% at 10GB → 45% at 100GB (harder curve, selectable). Unlimited is manual price.</div>
       </div>
-      <div class="table-wrap">
-        <table id="packages-table">
-          <thead>
-            <tr>
-              <th></th>
-              <th>Label</th>
-              <th>Data GB (0=Unlimited)</th>
-              <th>Discount</th>
-              <th>Price (toman)</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="packages-body"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
-        </table>
+
+      <div class="panel">
+        <div class="table-wrap">
+          <table id="packages-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Label</th>
+                <th>Data GB (0=Unlimited)</th>
+                <th>Discount</th>
+                <th>Price (toman)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="packages-body"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="packages-actions">
+          <button id="pkg-add" class="btn"><span data-icon="plus"></span>Add package</button>
+          <div class="spacer"></div>
+          <button id="pkg-discard" class="btn"><span data-icon="refresh-arrows"></span>Discard changes</button>
+          <button id="pkg-save" class="btn primary"><span data-icon="save"></span>Save</button>
+        </div>
+        <div id="pkg-msg" class="feedback muted"></div>
       </div>
-      <div class="packages-actions">
-        <button id="pkg-add" class="btn">+ Add package</button>
-        <div class="spacer"></div>
-        <button id="pkg-discard" class="btn">Discard changes</button>
-        <button id="pkg-save" class="btn primary">Save</button>
-      </div>
-      <div id="pkg-msg" class="muted small" style="margin-top:8px"></div>
     </section>
 
-    <section id="discounts-panel" class="panel hidden">
-      <div class="discounts-header">
-        <div class="packages-controls">
-          <label>Discount percent (%)
+    <section id="discounts-panel" class="stack hidden">
+      <div class="card-block">
+        <div class="card-block-title"><span data-icon="label"></span>Generate a discount code</div>
+        <div class="row">
+          <label class="field">Discount percent (%)
             <input id="disc-pct" type="number" min="1" max="100" step="1" placeholder="20">
           </label>
-          <label>Prefix (optional)
+          <label class="field">Prefix (optional)
             <input id="disc-prefix" type="text" maxlength="12" placeholder="e.g. SALE">
           </label>
-          <button id="disc-generate" class="btn primary">Generate code</button>
+          <button id="disc-generate" class="btn primary"><span data-icon="plus"></span>Generate code</button>
         </div>
-        <div id="disc-msg" class="muted small" style="margin-top:8px"></div>
+        <div id="disc-msg" class="feedback muted"></div>
       </div>
-      <div class="table-wrap">
-        <table id="discounts-table">
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>%</th>
-              <th>Status</th>
-              <th>Used by</th>
-              <th>Used at</th>
-              <th>Created</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="discounts-body"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
-        </table>
+
+      <div class="panel">
+        <div class="table-wrap">
+          <table id="discounts-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>%</th>
+                <th>Status</th>
+                <th>Used by</th>
+                <th>Used at</th>
+                <th>Created</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="discounts-body"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
-    <section id="messages-panel" class="panel hidden">
-      <div class="packages-header" style="border:1px solid var(--border);border-radius:12px;padding:12px;background:#0f1f18;margin-bottom:16px">
-        <div class="muted small" style="margin-bottom:8px">🎁 Generate subscription (gift — not counted in revenue)</div>
-        <div class="packages-controls">
-          <label>Telegram ID
+    <section id="messages-panel" class="stack hidden">
+      <div class="card-block">
+        <div class="card-block-title"><span data-icon="gift"></span>Generate subscription <span class="muted small">(gift — not counted in revenue)</span></div>
+        <div class="row">
+          <label class="field">Telegram ID
             <input id="gen-telegram-id" type="text" placeholder="e.g. 123456789" inputmode="numeric">
           </label>
-          <label>Package
-            <select id="gen-package-select" style="width:200px"><option value="custom">Custom</option></select>
+          <label class="field">Package
+            <select id="gen-package-select"><option value="custom">Custom</option></select>
           </label>
-          <label>Data GB (0=Unlimited)
+          <label class="field">Data GB (0=Unlimited)
             <input id="gen-data-gb" type="number" min="0" max="10000" step="1" placeholder="20">
           </label>
-          <label>Duration (days)
+          <label class="field">Duration (days)
             <input id="gen-duration" type="number" min="1" max="365" step="1" value="30">
           </label>
-          <label>Label
+          <label class="field">Label
             <input id="gen-label" type="text" maxlength="32" placeholder="e.g. Gift 20GB">
           </label>
-          <button id="gen-sub-btn" class="btn primary">Generate & Send</button>
+          <button id="gen-sub-btn" class="btn primary"><span data-icon="gift"></span>Generate &amp; Send</button>
         </div>
-        <div id="gen-sub-result" class="muted small" style="margin-top:8px"></div>
-        <div class="muted small" style="margin-top:4px">Creates an approved order with amount 0, provisions config on panel, stores in user's profile and notifies them via Telegram. Unlimited uses manual price 0.</div>
+        <div id="gen-sub-result" class="feedback muted"></div>
+        <div class="hint">Creates an approved order with amount 0, provisions config on panel, stores in user's profile and notifies them via Telegram. Unlimited uses manual price 0.</div>
       </div>
 
-      <div class="packages-header">
-        <div class="packages-controls">
-          <label>Mode
+      <div class="card-block">
+        <div class="card-block-title"><span data-icon="envelope-mail"></span>Send a message</div>
+        <div class="row">
+          <label class="field">Mode
             <select id="msg-mode">
               <option value="single">Single user</option>
               <option value="broadcast">Broadcast</option>
             </select>
           </label>
-          <label id="msg-single-wrap">Telegram ID
+          <label class="field" id="msg-single-wrap">Telegram ID
             <input id="msg-target" type="text" placeholder="e.g. 123456789" inputmode="numeric">
           </label>
-          <label id="msg-broadcast-q-wrap" class="hidden">Search users
+          <label class="field hidden" id="msg-broadcast-q-wrap">Search users
             <input id="msg-q" type="text" placeholder="q, username, name…">
           </label>
-          <label id="msg-broadcast-filter-wrap" class="hidden" style="flex-direction:row;align-items:center;gap:8px">
-            <input id="msg-has-approved" type="checkbox"> <span style="color:var(--text);font-size:13px">only with approved orders</span>
+          <label class="switch hidden" id="msg-broadcast-filter-wrap">
+            <input id="msg-has-approved" type="checkbox">
+            <span>only with approved orders</span>
           </label>
-          <button id="msg-resolve" class="btn">Lookup</button>
+          <button id="msg-resolve" class="btn"><span data-icon="search-magnifier"></span>Lookup</button>
         </div>
-        <div id="msg-target-info" class="muted small" style="margin-top:4px"></div>
-      </div>
+        <div id="msg-target-info" class="feedback muted"></div>
 
-      <div class="packages-header" style="margin-top:12px">
-        <div class="packages-controls">
-          <label>Custom message (HTML allowed: b,i,code,pre,a)
-            <textarea id="msg-text" rows="4" style="width:360px;max-width:100%;padding:10px 12px;background:#0f1f18;border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:14px;outline:none;resize:vertical" placeholder="e.g. <b>Hello</b> your subscription..."></textarea>
+        <div class="row">
+          <label class="field grow">Custom message (HTML allowed: b,i,code,pre,a)
+            <textarea id="msg-text" rows="4" placeholder="e.g. &lt;b&gt;Hello&lt;/b&gt; your subscription..."></textarea>
           </label>
-          <label style="flex-direction:row;align-items:center;gap:8px; min-width:220px">
-            <input id="msg-include-configs" type="checkbox"> <span style="color:var(--text);font-size:13px">Include configs (same as profile)</span>
+        </div>
+        <div class="row">
+          <label class="switch">
+            <input id="msg-include-configs" type="checkbox">
+            <span>Include configs (same as profile)</span>
           </label>
-          <label>Panel email (for configs)
-            <select id="msg-panel-email" style="width:220px">
+          <label class="field">Panel email (for configs)
+            <select id="msg-panel-email">
               <option value="">— no filter —</option>
               <option value="all">All emails for user</option>
             </select>
           </label>
         </div>
-        <div class="muted small">If you enable configs, the message sent will be: custom text + each config rendered like in the user's profile (max 10). Broadcast with configs limited to 200 users.</div>
+        <div class="hint">If you enable configs, the message sent will be: custom text + each config rendered like in the user's profile (max 10). Broadcast with configs limited to 200 users.</div>
+
+        <div class="row">
+          <button id="msg-preview" class="btn"><span data-icon="eye"></span>Preview</button>
+          <button id="msg-send" class="btn primary"><span data-icon="mail-send-paper-plane"></span>Send</button>
+          <span id="msg-result" class="feedback muted"></span>
+        </div>
+        <div id="msg-preview-box" class="table-wrap hidden"><div class="hint" id="msg-preview-inner"></div></div>
       </div>
 
-      <div class="packages-actions" style="margin-top:12px">
-        <button id="msg-preview" class="btn">Preview</button>
-        <button id="msg-send" class="btn primary">Send</button>
-        <span id="msg-result" class="muted small" style="margin-left:12px"></span>
+      <div class="card-block">
+        <div class="card-block-title"><span data-icon="clipboard-copy"></span>Recent sends</div>
+        <div class="table-wrap">
+          <table id="messages-log-table">
+            <thead>
+              <tr>
+                <th>At</th>
+                <th>Kind</th>
+                <th>Status</th>
+                <th>To</th>
+                <th>Preview</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="messages-log-body"><tr><td colspan="6"><div class="empty"><span data-icon="envelope-mail"></span><span>No messages yet</span></div></td></tr></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="messages-log-pag"></div>
       </div>
-      <div id="msg-preview-box" class="hidden" style="margin-top:12px;padding:12px;background:#0f1f18;border:1px solid var(--border);border-radius:10px;white-space:pre-wrap;word-break:break-word"></div>
-
-      <div style="margin-top:16px" class="muted small">Recent sends</div>
-      <div class="table-wrap" style="margin-top:6px">
-        <table id="messages-log-table">
-          <thead>
-            <tr>
-              <th>At</th>
-              <th>Kind</th>
-              <th>Status</th>
-              <th>To</th>
-              <th>Preview</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="messages-log-body"><tr><td colspan="6" class="muted">No messages yet</td></tr></tbody>
-        </table>
-      </div>
-      <div class="pagination" id="messages-log-pag"></div>
     </section>
 
     <footer class="footer muted">VardenProxy • Admin panel • Search indexes status/authority/ref</footer>
   </main>
 </div>
+<script src="/admin/static/icons.js"></script>
 <script src="/admin/static/app.js"></script>
 </body>
 </html>
