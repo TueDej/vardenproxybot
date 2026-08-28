@@ -176,6 +176,15 @@ async def _resume_payment_for_order(update: Update, context: ContextTypes.DEFAUL
         ).scalar_one_or_none()
         if order is None or order.status != "pending":
             context.user_data.pop("pending_order_id", None)
+            # A code consumed moments ago must not stay bound to a dead order
+            # (cancelled/expired between the two awaits) — free it for reuse.
+            if order is not None:
+                try:
+                    await release_discount_code_by_order(session, order)
+                except Exception:
+                    log.warning(
+                        "Failed to release discount code for dead order #%s", order.id, exc_info=True
+                    )
             await update.effective_message.reply_text(
                 "⚠️ سفارش منقضی یا لغو شده است؛ لطفاً از منوی اصلی دوباره شروع کنید.",
                 reply_markup=None,

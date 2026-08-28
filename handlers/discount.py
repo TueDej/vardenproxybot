@@ -75,6 +75,9 @@ async def validate_discount_code(session, code_str: str) -> DiscountCode | None:
         return None
     if dc.is_used:
         return None
+    if dc.discount_percent >= 100:
+        # 100% would create a 0-amount order the payment gateway rejects
+        return None
     return dc
 
 async def consume_discount_code(session, dc: DiscountCode, telegram_id: int, order_id: int | None = None) -> None:
@@ -134,7 +137,13 @@ async def release_discount_code_by_order(session, order: Order) -> None:
             should_release = True
         elif dc.used_order_id == order.id:
             should_release = True
-        elif order.discount_code and dc.code == (order.discount_code or "").strip().upper().replace("-", "").replace(" ", ""):
+        elif (
+            order.discount_code
+            and dc.code == (order.discount_code or "").strip().upper().replace("-", "").replace(" ", "")
+            # Only legacy rows never bound to a specific order may be freed by
+            # string match — if the code is consumed by another order, keep it.
+            and dc.used_order_id is None
+        ):
             should_release = True
     if should_release:
         dc.is_used = False

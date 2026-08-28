@@ -90,8 +90,8 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     when the user leaves the payment screen. Cancel is DB-driven (survives
     restart) and the payment callback will auto-reverse late payments.
     """
-    msg = update.effective_message
-    if msg is None or not getattr(msg, "text", None):
+    msg = update.message  # direct messages only — ignore edited posts/channel posts
+    if msg is None or not msg.text:
         return
     # Avoid reacting to messages that are actually commands (safety if filter changes)
     text = (msg.text or "").strip()

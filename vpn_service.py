@@ -33,6 +33,14 @@ class VPNPanelError(Exception):
     """Raised when the 3x-ui panel API returns an error or is unreachable."""
 
 
+class PanelRenewalLimitError(VPNPanelError):
+    """Renewal would exceed MAX_SUBSCRIPTION_DAYS (panel-side guard).
+
+    Structured marker raised by extend_client so the payment callback can
+    auto-refund a verified payment without string-matching error text.
+    """
+
+
 def build_expiry_ms(duration_days: int) -> int:
     expires = datetime.now(UTC) + timedelta(days=duration_days)
     return int(expires.timestamp() * 1000)
@@ -326,7 +334,7 @@ class VPNPanelService:
 
                 remaining_days = (existing_expiry - now_ms + 86400000 - 1) // 86400000
                 if remaining_days + int(duration_days) > MAX_SUBSCRIPTION_DAYS:
-                    raise VPNPanelError(
+                    raise PanelRenewalLimitError(
                         f"Renewal would exceed {MAX_SUBSCRIPTION_DAYS} days (remaining {remaining_days} + {duration_days}). "
                         "You cannot exceed 60 days per subscription."
                     )
@@ -336,6 +344,11 @@ class VPNPanelService:
                 pass
         if existing_expiry > now_ms:
             add_days = duration_days
+        elif existing_expiry == 0:
+            # Never-expiring client (expiryTime == 0): just add the duration.
+            # The old "revive from epoch" math produced absurd addDays values
+            # (clamped to 3650) and skipped the 60-day cap entirely.
+            add_days = int(duration_days)
         else:
             # Expired: shift so the new expiry lands at now + duration_days.
             add_days = int(duration_days + max(1, ceil((now_ms - existing_expiry) / 86400000)))

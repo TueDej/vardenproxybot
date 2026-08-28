@@ -67,9 +67,8 @@ async def free_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.message.reply_text("⚠️ این سفارش قبلاً تأیید شده است.", parse_mode="HTML")
             return
         except OrderNotApprovable as exc:
-            # 60-day limit is surfaced as RenewalLimitExceeded (a subclass);
-            # fall back to the "exceed" text for robustness.
-            if isinstance(exc, RenewalLimitExceeded) or "exceed" in str(exc).lower():
+            # 60-day limit is surfaced as RenewalLimitExceeded (a subclass)
+            if isinstance(exc, RenewalLimitExceeded):
                 await query.message.reply_text(
                     f"⛔ تمدید ممکن نیست — مجموع زمان اشتراک پس از تمدید بیش از 60 روز می‌شود.\n<code>{escape(str(exc))}</code>",
                     parse_mode="HTML",

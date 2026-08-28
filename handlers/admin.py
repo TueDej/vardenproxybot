@@ -11,6 +11,7 @@ from config import config
 from database import async_session
 from handlers.buy import (
     OrderAlreadyApproved,
+    OrderNotApprovable,
     approve_order,
     format_vpn_config,
     renew_order,
@@ -63,6 +64,12 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except OrderAlreadyApproved:
             await update.message.reply_text(
                 f"⚠️ سفارش #{order_id} هم‌اکنون توسط شخص دیگری تأیید شد."
+            )
+            return
+        except OrderNotApprovable as exc:
+            await update.message.reply_text(
+                f"⚠️ سفارش #{order_id} قابل تأیید نیست.\n<code>{escape(str(exc))}</code>",
+                parse_mode="HTML",
             )
             return
         except VPNPanelError as exc:

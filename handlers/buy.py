@@ -55,14 +55,24 @@ async def expire_pending_orders(session) -> int:
     # Collect IDs first to release discount codes after cancel
     try:
         ids_res = await session.execute(
-            select(Order.id).where(Order.status == "pending", Order.created_at < cutoff)
+            select(Order.id).where(
+                Order.status == "pending",
+                Order.created_at < cutoff,
+                Order.payment_ref_id.is_(None),
+            )
         )
         expired_ids = [r[0] for r in ids_res.all()]
     except Exception:
         expired_ids = []
     result = await session.execute(
         sa_update(Order)
-        .where(Order.status == "pending", Order.created_at < cutoff)
+        .where(
+            Order.status == "pending",
+            Order.created_at < cutoff,
+            # Orders marked "provisioning" have verified money attached and
+            # must NOT be auto-cancelled — an admin retry completes them.
+            Order.payment_ref_id.is_(None),
+        )
         .values(status="cancelled")
     )
     await session.commit()

@@ -642,7 +642,7 @@ setup_service() {
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=VardenProxy Telegram Bot
-After=network-online.target
+After=network-online.target postgresql.service
 Wants=network-online.target
 
 [Service]
@@ -654,6 +654,20 @@ EnvironmentFile=$ENV_FILE
 ExecStart=$INSTALL_DIR/venv/bin/python main.py
 Restart=on-failure
 RestartSec=10
+# ── Sandboxing: the app writes only inside $INSTALL_DIR and /run/lock ──
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ReadWritePaths=$INSTALL_DIR
+ReadWritePaths=-/run/lock
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+UMask=0077
 StandardOutput=journal
 StandardError=journal
 

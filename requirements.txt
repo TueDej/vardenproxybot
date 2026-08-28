@@ -1,8 +1,11 @@
 # Requires Python >= 3.11 (uses datetime.UTC, PEP 604 unions)
-python-telegram-bot[job-queue]>=21.4
-SQLAlchemy>=2.0.37
-psycopg[binary]>=3.3  # postgres async driver (no compile); for asyncpg use postgresql+asyncpg:// + asyncpg
+# Exact-pinned to versions verified in the production venv — regenerate with
+# `pip freeze` (and test) when upgrading; unpinned deps silently pull breaking
+# major versions on fresh installs.
+python-telegram-bot[job-queue]==22.8
+SQLAlchemy==2.0.52
+psycopg[binary]==3.3.4  # postgres async driver (no compile); for asyncpg use postgresql+asyncpg:// + asyncpg
 aiosqlite==0.20.0  # kept for local dev fallback when DATABASE_URL is sqlite
 python-dotenv==1.0.1
-httpx[socks]>=0.27
-aiohttp>=3.9
+httpx[socks]==0.28.1
+aiohttp==3.14.3

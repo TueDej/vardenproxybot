@@ -60,7 +60,7 @@ from message_render import (
     format_product_message as _msg_format_product,
 )
 from models import DiscountCode, MessageLog, Order, User
-from vpn_service import VPNPanelError, VPNPanelService
+from vpn_service import PanelRenewalLimitError, VPNPanelError, VPNPanelService
 from zarinpal import ZarinpalError, reverse_payment, verify_payment
 
 log = logging.getLogger(__name__)
@@ -107,8 +107,9 @@ def _is_trusted_proxy(remote: str | None) -> bool:
 def _check_admin_credentials(user: str, pwd: str) -> bool:
     if not config.admin_panel_enabled:
         return False
-    user_ok = hmac.compare_digest(user, config.admin_panel_user)
-    pass_ok = hmac.compare_digest(pwd, config.admin_panel_pass)
+    # compare_digest raises TypeError on non-ASCII str — compare bytes.
+    user_ok = hmac.compare_digest(user.encode("utf-8"), config.admin_panel_user.encode("utf-8"))
+    pass_ok = hmac.compare_digest(pwd.encode("utf-8"), config.admin_panel_pass.encode("utf-8"))
     return user_ok and pass_ok
 
 
@@ -225,7 +226,7 @@ async def handle_admin_login_post(request: web.Request) -> web.Response:
     # Set cookie — SameSite=Lax blocks most CSRF, HttpOnly prevents JS theft
     resp = web.HTTPFound("/admin/")
     # Build cookie header manually to support SameSite attribute reliably
-    cookie_val = f"{_ADMIN_COOKIE_NAME}={token}; Path=/admin/; HttpOnly; SameSite=Lax"
+    cookie_val = f"{_ADMIN_COOKIE_NAME}={token}; Path=/admin; HttpOnly; SameSite=Lax"
     if secure:
         cookie_val += "; Secure"
     # 7 days
@@ -241,7 +242,7 @@ async def handle_admin_logout(request: web.Request) -> web.Response:
     # Clear cookie
     resp.headers.add(
         "Set-Cookie",
-        f"{_ADMIN_COOKIE_NAME}=; Path=/admin/; HttpOnly; SameSite=Lax; Max-Age=0",
+        f"{_ADMIN_COOKIE_NAME}=; Path=/admin; HttpOnly; SameSite=Lax; Max-Age=0",
     )
     return resp
 
@@ -327,6 +328,13 @@ def _rate_key(request: web.Request) -> str | None:
     return None
 
 
+# Aggregate per-IP cap for the callback path: the per-Authority sub-key is
+# client-controlled, so without an aggregate cap a flood of unique Authority
+# values would churn the map and reset other clients' buckets.
+_CALLBACK_AGG_LIMIT = 120
+_RATE_MAP_SOFT_CAP = 2000
+
+
 @web.middleware
 async def rate_limit_middleware(request: web.Request, handler):
     key = _rate_key(request)
@@ -339,27 +347,36 @@ async def rate_limit_middleware(request: web.Request, handler):
                 limit, window = lim, win
                 break
         now = time.monotonic()
+        # Callback path: enforce an additional per-IP aggregate bucket.
+        keys: list[tuple[str, int]] = [(key, limit)]
+        if path == CALLBACK_PATH:
+            keys.append((f"{_client_ip(request)}:{path}:#agg", _CALLBACK_AGG_LIMIT))
         async with _rate_lock:
-            dq = _rate_hits.get(key)
-            if dq is None:
-                dq = collections.deque()
-                _rate_hits[key] = dq
-            # prune old
-            while dq and dq[0] <= now - window:
-                dq.popleft()
-            if len(dq) >= limit:
-                retry = int(dq[0] + window - now) + 1
+            retry = 0
+            for k, lim in keys:
+                dq = _rate_hits.get(k)
+                if dq is None:
+                    dq = collections.deque()
+                    _rate_hits[k] = dq
+                # prune old
+                while dq and dq[0] <= now - window:
+                    dq.popleft()
+                if len(dq) >= lim:
+                    retry = max(retry, int(dq[0] + window - now) + 1)
+                    continue
+                dq.append(now)
+            # cap memory: evict expired keys first — never reset live buckets
+            if len(_rate_hits) > _RATE_MAP_SOFT_CAP:
+                stale = now - 120  # > max window (60s) with margin
+                for k, d in list(_rate_hits.items()):
+                    if not d or d[0] <= stale:
+                        _rate_hits.pop(k, None)
+            if retry:
                 return web.Response(
                     status=429,
                     text="Too Many Requests",
                     headers={"Retry-After": str(max(1, retry))},
                 )
-            dq.append(now)
-            # cap memory
-            if len(_rate_hits) > 2000:
-                # drop oldest 20% keys
-                for k in list(_rate_hits.keys())[:400]:
-                    _rate_hits.pop(k, None)
     return await handler(request)
 
 
@@ -746,8 +763,9 @@ async def handle_admin_discounts_create(request: web.Request) -> web.Response:
         pct = int(pct)
     except (ValueError, TypeError):
         return web.json_response({"error": "discount_percent must be integer 1-100"}, status=400)
-    if not (1 <= pct <= 100):
-        return web.json_response({"error": "discount_percent out of range 1..100"}, status=400)
+    if not (1 <= pct <= 99):
+        # 100% would create a 0-amount order the payment gateway rejects
+        return web.json_response({"error": "discount_percent out of range 1..99"}, status=400)
     # Optional admin-supplied prefix (alnum, truncated in generator)
     prefix = data.get("prefix")
     if prefix is not None and not str(prefix).strip():
@@ -1471,6 +1489,11 @@ async def handle_admin_messages_send(request: web.Request) -> web.Response:
                     status=400,
                 )
 
+    # Fail fast instead of queueing behind a long-running broadcast: the send
+    # loop currently runs under the global lock, so a second concurrent send
+    # would otherwise hang the admin's browser for minutes.
+    if _broadcast_lock.locked():
+        return web.json_response({"error": "Another broadcast is in progress"}, status=429)
     # Acquire global lock before dedup + log creation to make them atomic (race-safe)
     async with _broadcast_lock:
         # Dedup + log creation (atomic under lock)
@@ -1805,6 +1828,19 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
                 "پرداختی برای این تراکنش ثبت نشده است. اگر مبلغ کسر شده، کمی بعد دوباره تلاش کنید.",
             )
         except VPNPanelError as exc:
+            # Panel-side over-limit guard (vpn_service.extend_client raises
+            # PanelRenewalLimitError): refund the verified payment, same as the
+            # in-renew_order pre-check's RenewalLimitExceeded.
+            if isinstance(exc, PanelRenewalLimitError):
+                log.info("Order #%s renewal exceeds 60 days (panel): %s", oid, exc)
+                try:
+                    outcome = await verify_payment(order.payment_authority, order.amount_toomans)
+                except ZarinpalError:
+                    return _page(
+                        "تمدید ممکن نیست",
+                        "مجموع زمان اشتراک پس از تمدید بیش از 60 روز می‌شود — تمدید انجام نشد.",
+                    )
+                return await _paid_cancelled_flow(application, session, order, authority, outcome)
             # Provisioning failed after money was verified. Keep the order
             # pending (a retry can complete it) and alert both the user and
             # the admins — without an admin ping a stranded paid order is
@@ -1824,6 +1860,16 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
                 f"<code>{escape(str(exc))}</code>\n"
                 "لطفاً دستی رسیدگی کنید (تأیید مجدد سفارش یا استرداد وجه).",
             )
+            # Mark the order so the 15-min auto-expire does NOT cancel it:
+            # money is captured and an admin retry (/approve or free-confirm)
+            # can still complete provisioning on the still-pending order.
+            try:
+                await session.execute(
+                    sa_update(Order).where(Order.id == oid).values(payment_ref_id="provisioning")
+                )
+                await session.commit()
+            except Exception:
+                log.warning("Could not mark order #%s as provisioning-pending", oid, exc_info=True)
             return _page("در حال بررسی", "پرداخت شما ثبت شد؛ فعال‌سازی چند دقیقه طول خواهد کشید.")
         except OrderAlreadyApproved:
             return _page(
@@ -1831,10 +1877,9 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
             )
         except OrderNotApprovable as exc:
             # 60-day limit: inform user and auto-refund if money moved.
-            # RenewalLimitExceeded is the structured marker; "exceed" is kept
-            # as a fallback. ("60" substring matching removed — panel emails
-            # and order ids can contain those digits by chance.)
-            if isinstance(exc, RenewalLimitExceeded) or "exceed" in str(exc).lower():
+            # RenewalLimitExceeded is the structured marker (no substring
+            # matching — panel emails/order ids can contain those by chance).
+            if isinstance(exc, RenewalLimitExceeded):
                 log.info("Order #%s renewal exceeds 60 days: %s", oid, exc)
                 try:
                     outcome = await verify_payment(order.payment_authority, order.amount_toomans)
