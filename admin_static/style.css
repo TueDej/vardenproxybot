@@ -592,15 +592,34 @@ code {
 }
 
 .packages-controls input[type="number"]::placeholder,
-.packages-controls input[type="text"]::placeholder {
+.packages-controls input[type="text"]::placeholder,
+#disc-pct::placeholder,
+#disc-prefix::placeholder {
   color: var(--muted);
   opacity: 0.7;
 }
 
 .packages-controls input[type="number"]:focus,
-.packages-controls input[type="text"]:focus {
+.packages-controls input[type="text"]:focus,
+#disc-pct:focus,
+#disc-prefix:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* Fallback: ensure discount inputs match even if attribute selector fails / cached */
+#disc-pct,
+#disc-prefix,
+.discounts-header input {
+  width: 180px;
+  padding: 10px 12px;
+  background: #0f1f18;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .switch {
