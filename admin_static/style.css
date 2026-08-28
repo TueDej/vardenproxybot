@@ -178,6 +178,13 @@ body {
   .sidebar-nav {
     flex-direction: row;
   }
+
+  .sidebar-footer {
+    flex-basis: 100%;
+    width: calc(100% + 28px);
+    margin: 8px -14px 0;
+    padding: 12px 14px 0;
+  }
 }
 
 /* ========== Header ========== */
