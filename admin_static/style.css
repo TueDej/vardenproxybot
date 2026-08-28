@@ -333,7 +333,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .header h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
 
-/* ── Stat cards ────────────────────────────── */
+/* ── Stat cards (vertical: icon / label / value) ── */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
@@ -343,42 +343,52 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .stat {
   display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 14px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   min-width: 0;
+  transition: border-color 0.15s, transform 0.15s;
 }
+
+.stat:hover { border-color: var(--border-2); transform: translateY(-1px); }
 
 .stat-icon {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   background: var(--accent-soft);
   border-radius: var(--radius-sm);
   color: var(--accent-bright);
 }
 
-.stat-icon .ico { height: 20px; }
+.stat-icon .ico { height: 19px; }
 
-.stat-meta { min-width: 0; }
+.stat-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 
 .stat-label {
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
-.stat-value { font-size: 19px; font-weight: 800; letter-spacing: -0.02em; }
+.stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  line-height: 1.1;
+}
 .stat-value.amber { color: var(--amber); }
 .stat-value.emerald { color: var(--accent-bright); }
 
@@ -610,16 +620,25 @@ tr.drag-over { outline: 1px dashed var(--accent); background: var(--card-2) !imp
 .login-card {
   width: 100%;
   max-width: 380px;
-  padding: 28px;
+  padding: 32px 28px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.login-brand { display: flex; align-items: center; gap: 12px; }
+.login-brand .brand-logo { width: 40px; height: 40px; }
+.login-brand .brand-logo .ico { height: 22px; }
 .login-card h1 { margin: 0; font-size: 22px; }
 .login-card h1 span { color: var(--accent-bright); font-weight: 400; }
+.login-card > .muted { margin-top: -10px; }
+.login-card .field { gap: 7px; }
+.login-card .field + .field { margin-top: 2px; }
+.login-card .btn { margin-top: 6px; height: 42px; }
 .login-card .error {
   padding: 8px 12px;
   background: var(--danger-soft);
@@ -627,7 +646,6 @@ tr.drag-over { outline: 1px dashed var(--accent); background: var(--card-2) !imp
   border-radius: var(--radius-sm);
   color: var(--danger);
   font-size: 13px;
-  margin-bottom: 4px;
 }
 
 /* ── Responsive ────────────────────────────── */
