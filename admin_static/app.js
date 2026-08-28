@@ -723,6 +723,78 @@ async function loadMessagesLog(page=1) {
 }
 window.loadMessagesLog = loadMessagesLog;
 
+// ── generate subscription (gift) ──
+let genPackagesCache = null;
+async function loadGenPackages() {
+  try {
+    const data = await fetchJSON("/admin/api/packages");
+    genPackagesCache = data.packages || [];
+    const sel = $("#gen-package-select");
+    if (!sel) return;
+    sel.innerHTML = '<option value="custom">Custom</option>';
+    genPackagesCache.forEach((p, idx) => {
+      const opt = document.createElement("option");
+      opt.value = String(idx);
+      opt.textContent = `${p.label} — ${p.data_gb === 0 ? "Unlimited" : p.data_gb + "GB"}`;
+      opt.dataset.gb = String(p.data_gb);
+      opt.dataset.label = p.label;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    console.error("loadGenPackages failed", e);
+  }
+}
+$("#gen-package-select")?.addEventListener("change", () => {
+  const sel = $("#gen-package-select");
+  const val = sel.value;
+  if (val === "custom") {
+    $("#gen-data-gb").value = "";
+    $("#gen-label").value = "";
+    return;
+  }
+  const idx = parseInt(val, 10);
+  const p = genPackagesCache && genPackagesCache[idx];
+  if (p) {
+    $("#gen-data-gb").value = String(p.data_gb);
+    $("#gen-label").value = p.label;
+  }
+});
+async function generateSubscription() {
+  const tid = $("#gen-telegram-id").value.trim();
+  const dataGbRaw = $("#gen-data-gb").value.trim();
+  const durationRaw = $("#gen-duration").value.trim();
+  const label = $("#gen-label").value.trim();
+  const result = $("#gen-sub-result");
+  result.textContent = "";
+  if (!tid || !/^-?\d+$/.test(tid)) { result.textContent = "Telegram ID required (numeric)"; result.style.color="#e07a7a"; return; }
+  if (dataGbRaw === "" || isNaN(parseInt(dataGbRaw,10))) { result.textContent = "Data GB required"; result.style.color="#e07a7a"; return; }
+  const data_gb = parseInt(dataGbRaw,10);
+  const duration_days = parseInt(durationRaw||"30",10);
+  if (data_gb <0 || data_gb>10000) { result.textContent="data_gb out of range 0..10000"; result.style.color="#e07a7a"; return; }
+  if (duration_days <1 || duration_days>365) { result.textContent="duration 1..365"; result.style.color="#e07a7a"; return; }
+  const btn = $("#gen-sub-btn"); btn.disabled=true; btn.textContent="Generating…";
+  try {
+    const res = await fetch("/admin/api/messages/generate-subscription", {
+      method:"POST",
+      headers:{"Content-Type":"application/json","X-Requested-With":"XMLHttpRequest"},
+      credentials:"include",
+      body: JSON.stringify({ telegram_id: tid, data_gb, duration_days, package_label: label || undefined })
+    });
+    if (res.status===401){ window.location.href="/admin/login"; return; }
+    const txt = await res.text();
+    let data; try{ data=JSON.parse(txt);} catch{ throw new Error(txt); }
+    if (!res.ok) throw new Error(data.error || txt);
+    result.textContent = `Generated order #${data.order_id} for ${tid} — ${data.panel_email || ""} ${data.notified ? "✓ notified" : "⚠ not notified: "+(data.notify_error||"")} — ${data.links ? data.links.length+" link(s)" : ""}`;
+    result.style.color="#5fb68a";
+    loadMessagesLog();
+    loadStats();
+  } catch(e){
+    result.textContent = "Generate failed: "+e.message;
+    result.style.color="#e07a7a";
+  } finally { btn.disabled=false; btn.textContent="Generate & Send"; }
+}
+$("#gen-sub-btn")?.addEventListener("click", generateSubscription);
+
 // ── nav ──
 function switchTab(tab) {
   currentTab = tab;
@@ -740,7 +812,7 @@ function switchTab(tab) {
   else if (tab === "users") loadUsers();
   else if (tab === "packages") loadPackages();
   else if (tab === "discounts") loadDiscounts();
-  else if (tab === "messages") loadMessagesLog();
+  else if (tab === "messages") { loadMessagesLog(); if (!genPackagesCache) loadGenPackages(); }
 }
 
 document.querySelectorAll(".nav-item, .tab").forEach((btn) => {

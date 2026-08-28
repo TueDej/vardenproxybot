@@ -96,6 +96,7 @@ class Order(Base):
     discount_code_id: Mapped[int | None] = mapped_column(
         ForeignKey("discount_codes.id", ondelete="SET NULL"), nullable=True
     )
+    is_gift: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

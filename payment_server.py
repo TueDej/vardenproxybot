@@ -27,6 +27,7 @@ from html import escape
 
 from aiohttp import web
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import selectinload
 
 from config import config
@@ -286,6 +287,7 @@ _MAX_CONFIG_MESSAGES = 10
 _ALLOWED_HTML_TAGS = {"b", "strong", "i", "em", "u", "s", "strike", "del", "code", "pre", "a"}
 _msg_send_hits: dict[str, collections.deque] = {}
 _msg_send_lock = asyncio.Lock()
+_gift_lock = asyncio.Lock()
 
 
 def _client_ip(request: web.Request) -> str:
@@ -433,11 +435,15 @@ async def handle_admin_stats(request: web.Request) -> web.Response:
             await session.execute(select(Order.status, func.count(Order.id)).group_by(Order.status))
         ).all()
         by_status = {row[0]: row[1] for row in status_rows}
-        # total revenue approved only
+        # total revenue approved only, excluding gifts (amount 0 or is_gift)
         total_revenue = (
             await session.execute(
                 select(func.coalesce(func.sum(Order.amount_toomans), 0)).where(
-                    Order.status == "approved"
+                    and_(
+                        Order.status == "approved",
+                        Order.amount_toomans > 0,
+                        or_(Order.is_gift == False, Order.is_gift.is_(None)),  # type: ignore[comparison-overlap]
+                    )
                 )
             )
         ).scalar() or 0
@@ -1116,6 +1122,182 @@ async def handle_admin_messages_log(request: web.Request) -> web.Response:
         return web.json_response({"total": total, "page": page, "limit": limit, "items": items})
 
 
+async def handle_admin_generate_subscription(request: web.Request) -> web.Response:
+    # Rate limit gift generation: 10/min per IP
+    ip = _client_ip(request)
+    key = f"gift_gen:{ip}"
+    now = time.monotonic()
+    async with _msg_send_lock:
+        dq = _msg_send_hits.get(key)
+        if dq is None:
+            dq = collections.deque()
+            _msg_send_hits[key] = dq
+        while dq and dq[0] <= now - 60:
+            dq.popleft()
+        if len(dq) >= 10:
+            retry = int(dq[0] + 60 - now) + 1
+            return web.json_response({"error": "Too many gift generations, retry later"}, status=429, headers={"Retry-After": str(max(1, retry))})
+        dq.append(now)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    # Validate telegram_id
+    tid_raw = data.get("telegram_id") or data.get("target")
+    if tid_raw is None or str(tid_raw).strip() == "":
+        return web.json_response({"error": "telegram_id required"}, status=400)
+    try:
+        telegram_id = int(str(tid_raw).strip())
+    except (ValueError, TypeError):
+        return web.json_response({"error": "invalid telegram_id"}, status=400)
+    if telegram_id <= 0 or telegram_id > 10**15:
+        return web.json_response({"error": "telegram_id out of range"}, status=400)
+    # data_gb and duration
+    try:
+        data_gb = int(data.get("data_gb", 0))
+    except (ValueError, TypeError):
+        return web.json_response({"error": "data_gb must be integer"}, status=400)
+    if data_gb < 0 or data_gb > 10000:
+        return web.json_response({"error": "data_gb out of range 0..10000"}, status=400)
+    try:
+        duration_days = int(data.get("duration_days") or data.get("duration") or 30)
+    except (ValueError, TypeError):
+        return web.json_response({"error": "duration_days must be integer"}, status=400)
+    if duration_days < 1 or duration_days > 365:
+        return web.json_response({"error": "duration_days out of range 1..365"}, status=400)
+    label = str(data.get("package_label") or data.get("label") or "").strip()
+    if not label:
+        label = "Unlimited" if data_gb == 0 else f"{data_gb}GB"
+        if data.get("is_gift") is not False:
+            label = f"Gift {label}"
+    if len(label) > 64:
+        label = label[:64]
+    if not config.panel_configured:
+        return web.json_response({"error": "Panel not configured"}, status=500)
+    # Serialize with global gift lock to avoid races on same user
+    async with _gift_lock:
+        # Get or create user
+        async with async_session() as session:
+            result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+            user = result.scalar_one_or_none()
+            if user is None:
+                # Auto-create minimal user (admin gift for new user)
+                user = User(telegram_id=telegram_id, username=None, first_name=f"User {telegram_id}")
+                session.add(user)
+                try:
+                    await session.commit()
+                    await session.refresh(user)
+                except Exception as e:
+                    await session.rollback()
+                    return web.json_response({"error": f"Could not create user: {e}"}, status=500)
+            # Create pending gift order
+            order = Order(
+                user_id=user.id,
+                package_label=label,
+                duration_days=duration_days,
+                data_gb=data_gb,
+                amount_toomans=0,
+                status="pending",
+                is_gift=True,
+            )
+            session.add(order)
+            await session.commit()
+            await session.refresh(order)
+            order_id = order.id
+            user_id = user.id
+        # Provision via approve_order (handles panel create + atomic claim)
+        from handlers.buy import approve_order
+
+        async with async_session() as session:
+            result = await session.execute(select(Order).where(Order.id == order_id))
+            order = result.scalar_one_or_none()
+            if order is None:
+                return web.json_response({"error": "order not found after create"}, status=500)
+            try:
+                panel = await approve_order(session, order)
+            except Exception as exc:
+                # Mark cancelled on failure
+                try:
+                    async with async_session() as s2:
+                        await s2.execute(sa_update(Order).where(Order.id == order_id).values(status="cancelled"))
+                        await s2.commit()
+                except Exception:
+                    pass
+                log.warning("Gift generation failed for %s: %s", telegram_id, exc)
+                return web.json_response({"error": f"Panel provisioning failed: {exc}"}, status=500)
+            # panel now has email, sub_id, links
+            email = panel.get("email")
+            links = panel.get("links", [])
+        # Notify user via Telegram (best-effort)
+        application = request.app.get("ptb_application")
+        notify_ok = False
+        notify_error = None
+        if application is not None and hasattr(application, "bot") and application.bot is not None:
+            try:
+                # Build config message similar to profile format
+                from message_render import data_label as _dl
+
+                # Use same format as profile for consistency
+                # Fetch hydrated to get expiry/limit etc. for nice rendering? Use panel data directly.
+                # Simple: send links block + expiry
+                if links:
+                    config_block = "\n".join(f"🔗 <code>{escape(l)}</code>" for l in links)
+                    text = (
+                        f"🎁 <b>هدیه اشتراک برای شما فعال شد!</b>\n\n"
+                        f"📦 {escape(label)} | {duration_days} روز\n"
+                        f"📧 <code>{escape(email or '')}</code>\n\n"
+                        f"{config_block}\n\n"
+                        f"از بخش 👤 پروفایل هم می‌توانید کانفیگ‌ها را ببینید."
+                    )
+                else:
+                    # Fallback: hydrate like profile
+                    bucket = await _hydrate_configs_for_user(telegram_id, email)
+                    if bucket:
+                        now = datetime.now(UTC)
+                        parts = []
+                        for c, expiry, online, st in bucket:
+                            if st == "active":
+                                parts.append(_msg_format_product(c, expiry, online, now))
+                        text = "🎁 <b>هدیه اشتراک</b>\n\n" + "\n\n".join(parts[:2]) if parts else "🎁 اشتراک هدیه فعال شد."
+                    else:
+                        text = f"🎁 <b>اشتراک هدیه</b> {escape(label)} فعال شد."
+                await application.bot.send_message(chat_id=telegram_id, text=text, parse_mode="HTML")
+                notify_ok = True
+            except Exception as e:
+                notify_error = str(e)
+                log.warning("Could not notify user %s about gift: %s", telegram_id, e)
+        # Also create a MessageLog-like entry for audit? Use MessageLog with kind=gift
+        try:
+            async with async_session() as session:
+                ml = MessageLog(
+                    admin_user=_get_admin_identity(request),
+                    kind="gift",
+                    status="done" if notify_ok else "done",
+                    filter_json={"telegram_id": telegram_id, "order_id": order_id, "label": label},
+                    text_html=f"Gift {label} {data_gb}GB {duration_days}d",
+                    panel_email=email,
+                    total=1,
+                    sent=1 if notify_ok else 0,
+                    failed=0 if notify_ok else 1,
+                    error_summary=notify_error,
+                )
+                session.add(ml)
+                await session.commit()
+        except Exception:
+            pass
+        return web.json_response(
+            {
+                "ok": True,
+                "order_id": order_id,
+                "user_id": user_id,
+                "panel_email": email,
+                "links": links,
+                "notified": notify_ok,
+                "notify_error": notify_error,
+            }
+        )
+
+
 async def handle_admin_messages_send(request: web.Request) -> web.Response:
     # Extra per-IP messaging rate limit
     rl = await _check_msg_send_ratelimit(request)
@@ -1743,6 +1925,7 @@ def build_app(application) -> web.Application:
     app.router.add_post(ADMIN_PREFIX + "/api/messages/preview", handle_admin_messages_preview)
     app.router.add_post(ADMIN_PREFIX + "/api/messages/send", handle_admin_messages_send)
     app.router.add_get(ADMIN_PREFIX + "/api/messages/log", handle_admin_messages_log)
+    app.router.add_post(ADMIN_PREFIX + "/api/messages/generate-subscription", handle_admin_generate_subscription)
     # Static files for admin UI (public for login page styling)
     static_dir = _admin_static_dir()
     if static_dir.exists():

@@ -176,6 +176,30 @@
     </section>
 
     <section id="messages-panel" class="panel hidden">
+      <div class="packages-header" style="border:1px solid var(--border);border-radius:12px;padding:12px;background:#0f1f18;margin-bottom:16px">
+        <div class="muted small" style="margin-bottom:8px">🎁 Generate subscription (gift — not counted in revenue)</div>
+        <div class="packages-controls">
+          <label>Telegram ID
+            <input id="gen-telegram-id" type="text" placeholder="e.g. 123456789" inputmode="numeric">
+          </label>
+          <label>Package
+            <select id="gen-package-select" style="width:200px"><option value="custom">Custom</option></select>
+          </label>
+          <label>Data GB (0=Unlimited)
+            <input id="gen-data-gb" type="number" min="0" max="10000" step="1" placeholder="20">
+          </label>
+          <label>Duration (days)
+            <input id="gen-duration" type="number" min="1" max="365" step="1" value="30">
+          </label>
+          <label>Label
+            <input id="gen-label" type="text" maxlength="32" placeholder="e.g. Gift 20GB">
+          </label>
+          <button id="gen-sub-btn" class="btn primary">Generate & Send</button>
+        </div>
+        <div id="gen-sub-result" class="muted small" style="margin-top:8px"></div>
+        <div class="muted small" style="margin-top:4px">Creates an approved order with amount 0, provisions config on panel, stores in user's profile and notifies them via Telegram. Unlimited uses manual price 0.</div>
+      </div>
+
       <div class="packages-header">
         <div class="packages-controls">
           <label>Mode

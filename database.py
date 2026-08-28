@@ -104,6 +104,11 @@ def _migrate_sync(sync_conn) -> None:
                 "ALTER TABLE orders ADD COLUMN discount_code_id INTEGER REFERENCES discount_codes(id) ON DELETE SET NULL",
                 "Added orders.discount_code_id",
             )
+        if "is_gift" not in cols:
+            _add_col(
+                "ALTER TABLE orders ADD COLUMN is_gift BOOLEAN DEFAULT 0 NOT NULL",
+                "Added orders.is_gift",
+            )
 
     # Telegram user IDs exceed INTEGER range (~2.1e9) — ensure BIGINT on Postgres.
     if not str(sync_conn.engine.url).startswith("sqlite"):
