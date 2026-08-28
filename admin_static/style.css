@@ -136,9 +136,7 @@ body {
 }
 
 .sidebar-footer {
-  margin-top: auto;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  display: none;
 }
 
 .main {
@@ -435,9 +433,26 @@ table {
 
 #orders-table td:nth-child(7),
 #orders-table td:nth-child(8) {
-  max-width: 110px;
+  max-width: 160px;
+}
+
+#orders-table .cell-copy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+#orders-table .cell-copy code {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#orders-table .cell-copy .copy {
+  flex-shrink: 0;
 }
 
 #orders-table td:nth-child(2) {

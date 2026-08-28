@@ -90,9 +90,9 @@ async function loadOrders() {
         <td>${escapeHtml(o.package_label)}</td>
         <td>${fmtAmount(o.amount_toomans)}</td>
         <td>${pill(o.status)}</td>
-        <td>${o.payment_ref_id ? `<code>${escapeHtml(o.payment_ref_id)}</code><span class="copy" data-copy="${escapeAttr(o.payment_ref_id)}" onclick="copyText(this.dataset.copy)">copy</span>` : '<span class="muted">—</span>'}</td>
-        <td><code title="${escapeAttr(o.payment_authority || "")}">${o.payment_authority ? escapeHtml(o.payment_authority.slice(0, 12)) + "…" : "—"}</code>${o.payment_authority ? `<span class="copy" data-copy="${escapeAttr(o.payment_authority)}" onclick="copyText(this.dataset.copy)">copy</span>` : ""}</td>
-        <td>${o.panel_email ? `<code>${escapeHtml(o.panel_email)}</code><span class="copy" data-copy="${escapeAttr(o.panel_email)}" onclick="copyText(this.dataset.copy)">copy</span>` : '<span class="muted">—</span>'}</td>
+        <td>${o.payment_ref_id ? `<div class="cell-copy"><code>${escapeHtml(o.payment_ref_id)}</code><span class="copy" data-copy="${escapeAttr(o.payment_ref_id)}" onclick="copyText(this.dataset.copy)">copy</span></div>` : '<span class="muted">—</span>'}</td>
+        <td>${o.payment_authority ? `<div class="cell-copy"><code title="${escapeAttr(o.payment_authority)}">${escapeHtml(o.payment_authority)}</code><span class="copy" data-copy="${escapeAttr(o.payment_authority)}" onclick="copyText(this.dataset.copy)">copy</span></div>` : '<span class="muted">—</span>'}</td>
+        <td>${o.panel_email ? `<div class="cell-copy"><code title="${escapeAttr(o.panel_email)}">${escapeHtml(o.panel_email)}</code><span class="copy" data-copy="${escapeAttr(o.panel_email)}" onclick="copyText(this.dataset.copy)">copy</span></div>` : '<span class="muted">—</span>'}</td>
         <td>${fmtDate(o.created_at)}</td>
       </tr>
     `
