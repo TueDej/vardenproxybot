@@ -249,7 +249,7 @@ async def _auto_expire_loop() -> None:
 _RATE_LIMITS: dict[str, tuple[int, int]] = {
     CALLBACK_PATH: (20, 60),  # Zarinpal callback: 20/min per IP+authority
     "/zarinpal/start": (30, 60),  # start page: 30/min per IP
-    ADMIN_PREFIX: (60, 60),  # admin API/UI: 60/min per IP
+    ADMIN_PREFIX: (180, 60),  # admin API/UI: 180/min per IP (was 60 — too tight for refreshes; 6 req/load → 30 refreshes/min)
     "/healthz": (120, 60),
 }
 
