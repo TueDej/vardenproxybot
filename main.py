@@ -25,7 +25,11 @@ from handlers.buy import (
     cancel_order,
     package_selected,
 )
-from handlers.discount_flow import discount_code_entered, handle_disc_prompt_callback
+from handlers.discount_flow import (
+    discount_code_entered,
+    handle_disc_prompt_callback,
+    handle_discount_choice_text,
+)
 from handlers.free import free_confirm_callback
 from handlers.profile import profile
 from handlers.renew import renew_callback
@@ -101,6 +105,14 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cancel_order(update, context)
         return
 
+    # ── Discount-choice buttons (typed from the reply keyboard) — must be
+    # intercepted before the auto-cancel guard so choosing an option does not
+    # cancel the pending order. Any other text falls through to the guard. ──
+    if context.user_data.get("awaiting_discount_choice"):
+        handled = await handle_discount_choice_text(update, context)
+        if handled:
+            return
+
     # ── Awaiting discount-code entry: intercept free text before the
     # auto-cancel guard so the typed code is not treated as navigation. ──
     if context.user_data.get("awaiting_discount_code"):
@@ -118,8 +130,8 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if cancelled:
                 ids_str = ", #".join(str(i) for i in cancelled)
                 await update.effective_message.reply_text(
-                    f"❌ سفارش #{ids_str} به‌صورت خودکار <b>لغو</b> شد چون به بخش دیگری رفتید.\n"
-                    "💡 اگر مبلغی پرداخت کرده‌اید، به‌صورت خودکار به حساب شما بازگردانده می‌شود.",
+                    f"❌ سفارش #{ids_str} به‌صورت خودکار لغو شد.\n"
+                    "💡 اگر پرداختی انجام شده باشد، مبلغ به‌صورت خودکار بازگردانده می‌شود.",
                     parse_mode="HTML",
                     reply_markup=main_menu_keyboard(),
                 )

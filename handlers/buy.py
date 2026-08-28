@@ -20,7 +20,6 @@ from config import config
 from database import async_session
 from handlers.rate_limit import check_cooldown
 from keyboards import (
-    home_keyboard,
     main_menu_keyboard,
     packages_keyboard,
 )
@@ -257,7 +256,8 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     context.user_data.clear()
     await update.message.reply_text(
-        "🛒 <b>انتخاب پکیج</b>\n\nتمام اشتراک‌ها یک‌ماهه هستند:",
+        "🛒 <b>انتخاب پکیج</b>\n\n"
+        "اشتراک‌ها یک‌ماهه هستند؛ یکی را انتخاب کنید:",
         reply_markup=packages_keyboard(),
         parse_mode="HTML",
     )
@@ -396,11 +396,11 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data.pop("order_id", None)
     context.user_data.pop("awaiting_discount_code", None)
+    context.user_data.pop("awaiting_discount_choice", None)
     context.user_data.pop("pending_order_id", None)
     await update.message.reply_text(
         f"❌ سفارش #{order_id} لغو شد.",
-        reply_markup=home_keyboard(),
-        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
     )
 
 

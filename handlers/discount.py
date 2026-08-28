@@ -4,10 +4,7 @@ import string
 
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
-from telegram import Update
-from telegram.ext import ContextTypes
 
-from database import async_session
 from models import DiscountCode, Order
 
 log = logging.getLogger(__name__)

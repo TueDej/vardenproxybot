@@ -11,7 +11,6 @@ from handlers.rate_limit import check_cooldown
 from models import Order, User
 from packages import DURATION_DAYS, MAX_SUBSCRIPTION_DAYS, calc_price, load_packages
 from vpn_service import VPNPanelError, VPNPanelService
-from zarinpal import ZarinpalError
 
 log = logging.getLogger(__name__)
 

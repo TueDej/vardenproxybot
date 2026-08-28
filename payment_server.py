@@ -1851,7 +1851,7 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
                 application,
                 chat_id,
                 "✅ پرداخت شما دریافت شد، اما آماده‌سازی کانفیگ اندکی طول کشیده است. "
-                "به‌زودی از بخش «👤 پروفایل من» بررسی کنید یا با پشتیبانی تماس بگیرید.",
+                "به‌زودی از بخش 👤 پروفایل و اشتراک‌های من بررسی کنید یا با پشتیبانی تماس بگیرید.",
             )
             await _notify_admins(
                 application,
@@ -1907,7 +1907,7 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
             chat_id,
             f"🎉 <b>تمدید اشتراک شما با موفقیت انجام شد!</b> (سفارش #{escape(str(oid))})\n\n"
             "زمان اشتراک فعلی شما تمدید شد؛ همان کانفیگ قبلی همچنان معتبر است.\n"
-            "وضعیت را از بخش «👤 پروفایل من» بررسی کنید.",
+            "وضعیت را از بخش 👤 پروفایل و اشتراک‌های من بررسی کنید.",
         )
         body = (
             f"تمدید با موفقیت انجام شد (کد پیگیری: {escape(str(ref))}). "
@@ -1918,7 +1918,7 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
             application,
             chat_id,
             f"🎉 <b>پرداخت شما با موفقیت تأیید شد!</b> (سفارش #{escape(str(oid))})\n\n"
-            "کانفیگ شما آماده است؛ آن را از بخش «👤 پروفایل من» دریافت کنید.",
+            "کانفیگ شما آماده است؛ آن را از بخش 👤 پروفایل و اشتراک‌های من دریافت کنید.",
         )
         body = f"پرداخت با موفقیت تأیید شد (کد پیگیری: {escape(str(ref))}). به ربات برگردید و کانفیگ خود را دریافت کنید."
     return _page("پرداخت موفق ✅", body)
@@ -1934,7 +1934,7 @@ async def _notify(application, chat_id: int, text: str | None) -> None:
         if text is None:
             text = (
                 "🎉 <b>پرداخت شما با موفقیت تأیید شد!</b>\n\n"
-                "کانفیگ شما آماده است؛ آن را از بخش «👤 پروفایل من» دریافت کنید."
+                "کانفیگ شما آماده است؛ آن را از بخش 👤 پروفایل و اشتراک‌های من دریافت کنید."
             )
         await application.bot.send_message(
             chat_id=chat_id,

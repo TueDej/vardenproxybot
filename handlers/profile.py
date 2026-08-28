@@ -18,9 +18,6 @@ from database import async_session
 from handlers.rate_limit import check_cooldown
 from keyboards import home_keyboard, main_menu_keyboard
 from message_render import (
-    data_label as _data_label,
-)
-from message_render import (
     expiry_dt as _expiry_dt,
 )
 from message_render import (
@@ -73,7 +70,9 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         clients = await VPNPanelService.get_clients_by_telegram_id(telegram_id)
     except VPNPanelError as exc:
-        text += f"<i>خطای سرور: {escape(str(exc))}</i>"
+        # Don't leak raw panel errors to the user — log details, show a clean message
+        log.warning("Profile panel error for %s: %s", telegram_id, exc)
+        text += "<i>❌ خطا در دریافت اطلاعات از سرور؛ لطفاً کمی بعد دوباره تلاش کنید.</i>"
         await update.message.reply_text(text, reply_markup=home_keyboard(), parse_mode="HTML")
         return
 

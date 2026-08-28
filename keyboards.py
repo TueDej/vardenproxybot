@@ -22,6 +22,11 @@ def _package_buttons():
     return rows
 
 
+CANCEL_BUTTON = "❌ انصراف"
+CHOICE_HAVE_CODE = "🎟️ دارم کد تخفیف"
+CHOICE_NO_CODE = "⏭️ نه، ادامه"
+
+
 def main_menu_keyboard():
     return ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
 
@@ -50,7 +55,11 @@ def home_keyboard():
 
 
 def discount_prompt_keyboard() -> InlineKeyboardMarkup:
-    """Prompt before gateway: ask whether user has a discount code."""
+    """Legacy inline discount prompt (kept for older messages still in chats).
+
+    New prompts use the reply-keyboard `discount_choice_keyboard()` instead,
+    which keeps ❌ انصراف visible and needs no callback state.
+    """
     return InlineKeyboardMarkup(
         [
             [
@@ -58,6 +67,32 @@ def discount_prompt_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("⏭️ نه، ادامه بدون تخفیف", callback_data="disc|no"),
             ]
         ]
+    )
+
+
+def discount_choice_keyboard() -> ReplyKeyboardMarkup:
+    """Discount prompt: enter a code, skip, or cancel — all visible at once.
+
+    Reply keyboard (not inline) so the routing stays in menu_router and
+    survives bot restarts; ❌ انصراف is always on screen.
+    """
+    return ReplyKeyboardMarkup(
+        [
+            [CHOICE_HAVE_CODE, CHOICE_NO_CODE],
+            [CANCEL_BUTTON],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def discount_entry_keyboard() -> ReplyKeyboardMarkup:
+    """Shown while a discount code is awaited: explicit skip and cancel rows."""
+    return ReplyKeyboardMarkup(
+        [
+            ["⏭️ ادامه بدون تخفیف"],
+            [CANCEL_BUTTON],
+        ],
+        resize_keyboard=True,
     )
 
 
