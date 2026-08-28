@@ -18,10 +18,10 @@ CODE_SUFFIX_LEN = 6  # random part appended after an optional admin prefix
 PREFIX_MAX_LEN = 12  # admin-supplied prefix is truncated to this
 
 def _sanitize_prefix(prefix: str | None) -> str:
-    """Normalize an admin prefix: uppercase alnum only, truncated."""
+    """Normalize an admin prefix: uppercase alnum + underscore, truncated."""
     if not prefix:
         return ""
-    out = "".join(ch for ch in str(prefix).strip().upper() if ch.isalnum())
+    out = "".join(ch for ch in str(prefix).strip().upper() if ch.isalnum() or ch == "_")
     return out[:PREFIX_MAX_LEN]
 
 def _generate_code() -> str:
@@ -78,18 +78,41 @@ async def validate_discount_code(session, code_str: str) -> DiscountCode | None:
     return dc
 
 async def consume_discount_code(session, dc: DiscountCode, telegram_id: int, order_id: int | None = None) -> None:
-    dc.is_used = True
+    """Atomically claim a discount code (fails if already used)."""
     from datetime import datetime
+
     try:
         from datetime import UTC
     except ImportError:
         from datetime import timezone
-        UTC = timezone.utc
-    dc.used_at = datetime.now(UTC)
-    dc.used_by_telegram_id = telegram_id
-    if order_id is not None:
-        dc.used_order_id = order_id
+
+        UTC = timezone.utc  # type: ignore[no-redef]  # noqa: UP017
+    # Atomic UPDATE ... WHERE is_used = false — prevents double-spend under concurrent use
+    result = await session.execute(
+        sa_update(DiscountCode)
+        .where(DiscountCode.id == dc.id, DiscountCode.is_used == False)  # noqa: E712
+        .values(
+            is_used=True,
+            used_at=datetime.now(UTC),
+            used_by_telegram_id=telegram_id,
+            used_order_id=order_id,
+        )
+    )
+    code_str = dc.code  # capture before possible expire on rollback
+    if result.rowcount == 0:
+        # Already claimed by another transaction — refresh state for caller
+        await session.rollback()
+        raise RuntimeError(f"Discount code {code_str} already used")
     await session.commit()
+    # Keep ORM object in sync (session is expire_on_commit=False, but be defensive)
+    try:
+        dc.is_used = True
+        dc.used_at = datetime.now(UTC)
+        dc.used_by_telegram_id = telegram_id
+        if order_id is not None:
+            dc.used_order_id = order_id
+    except Exception:
+        pass
 
 async def release_discount_code_by_order(session, order: Order) -> None:
     """If order had a discount code and is cancelled/expired, free the code for reuse."""
@@ -100,10 +123,20 @@ async def release_discount_code_by_order(session, order: Order) -> None:
         result = await session.execute(select(DiscountCode).where(DiscountCode.id == order.discount_code_id))
         dc = result.scalar_one_or_none()
     elif order.discount_code:
-        code = (order.discount_code or "").strip().upper()
+        code = (order.discount_code or "").strip().upper().replace("-", "").replace(" ", "")
         result = await session.execute(select(DiscountCode).where(DiscountCode.code == code))
         dc = result.scalar_one_or_none()
-    if dc and dc.is_used and dc.id == order.discount_code_id:
+    # Relaxed guard: allow release when id matches, or when code is bound to this order,
+    # or for legacy rows where discount_code_id is NULL but code string matches.
+    should_release = False
+    if dc and dc.is_used:
+        if dc.id == order.discount_code_id:
+            should_release = True
+        elif dc.used_order_id == order.id:
+            should_release = True
+        elif order.discount_code and dc.code == (order.discount_code or "").strip().upper().replace("-", "").replace(" ", ""):
+            should_release = True
+    if should_release:
         dc.is_used = False
         dc.used_at = None
         dc.used_by_telegram_id = None

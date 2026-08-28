@@ -54,8 +54,8 @@ def discount_prompt_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("🎟️ Yes, I have a code", callback_data="disc|yes"),
-                InlineKeyboardButton("⏭️ No, continue", callback_data="disc|no"),
+                InlineKeyboardButton("🎟️ بله، کد دارم", callback_data="disc|yes"),
+                InlineKeyboardButton("⏭️ نه، ادامه بدون تخفیف", callback_data="disc|no"),
             ]
         ]
     )

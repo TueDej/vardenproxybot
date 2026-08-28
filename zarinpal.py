@@ -32,7 +32,11 @@ _TIMEOUT = httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=10.0)
 def _toman_to_rial(amount_toman: int) -> int:
     if amount_toman < 0:
         raise ZarinpalError(f"negative amount: {amount_toman}")
-    return amount_toman * RIAL_PER_TOMAN
+    rial = amount_toman * RIAL_PER_TOMAN
+    # Zarinpal PG v4 caps around 1e9 rial (~100M toman); fail fast on absurd values
+    if rial > 1_000_000_000 or amount_toman > 100_000_000:
+        raise ZarinpalError(f"amount exceeds gateway limit: {amount_toman} toman")
+    return rial
 
 
 class ZarinpalError(Exception):

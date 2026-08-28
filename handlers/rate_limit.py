@@ -1,11 +1,13 @@
 """In-memory per-user cooldown for telegram handlers (safe for concurrent_updates=True)."""
 
 import asyncio
+import threading
 import time
 
 # (user_id, key) -> last monotonic timestamp
 _last: dict[tuple[int, str], float] = {}
 _lock = asyncio.Lock()
+_sync_lock = threading.Lock()
 
 
 async def check_cooldown(user_id: int, key: str, seconds: int) -> bool:
@@ -33,8 +35,14 @@ def check_cooldown_sync(user_id: int, key: str, seconds: int) -> bool:
     """Sync variant for contexts where async lock not needed (rare)."""
     now = time.monotonic()
     k = (user_id, key)
-    last = _last.get(k, 0)
-    if now - last < seconds:
-        return False
-    _last[k] = now
-    return True
+    with _sync_lock:
+        last = _last.get(k, 0)
+        if now - last < seconds:
+            return False
+        _last[k] = now
+        if len(_last) > 5000:
+            cutoff = now - 3600
+            for kk, ts in list(_last.items()):
+                if ts < cutoff:
+                    _last.pop(kk, None)
+        return True

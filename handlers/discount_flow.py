@@ -9,12 +9,11 @@ from config import config
 from database import async_session
 from handlers.discount import (
     calc_discounted_amount,
-    consume_discount_code,
     release_discount_code_by_order,
     validate_discount_code,
 )
 from keyboards import cancel_keyboard, discount_prompt_keyboard, payment_keyboard
-from models import Order
+from models import DiscountCode, Order
 from vpn_service import VPNPanelError
 from zarinpal import ZarinpalError, request_payment
 
@@ -61,7 +60,7 @@ async def handle_disc_prompt_callback(update: Update, context: ContextTypes.DEFA
         context.user_data["awaiting_discount_code"] = True
         await query.message.reply_text(
             "✏️ لطفاً <b>کد تخفیف</b> خود را ارسال کنید.\n"
-            "اگر کد ندارید، کلمه <code>skip</code> را بفرستید تا بدون تخفیف ادامه دهید.\n"
+            "اگر کد ندارید، کلمه «<code>رد</code>» را بفرستید تا بدون تخفیف ادامه دهید.\n"
             "برای لغو، «❌ انصراف» را بزنید.",
             parse_mode="HTML",
         )
@@ -110,21 +109,53 @@ async def discount_code_entered(update: Update, context: ContextTypes.DEFAULT_TY
         if dc is None:
             await update.effective_message.reply_text(
                 "❌ کد تخفیف نامعتبر است یا قبلاً استفاده شده.\n"
-                "می‌توانید کد دیگری بفرستید یا <code>skip</code> بنویسید تا بدون تخفیف ادامه دهید.",
+                "می‌توانید کد دیگری بفرستید یا «<code>رد</code>» بنویسید تا بدون تخفیف ادامه دهید.",
                 parse_mode="HTML",
             )
             return
-        # Apply discount
+        # Atomic discount application: claim code + update order in one transaction
+        # Prevents double-spend when two users (or two tabs) race on the same code,
+        # and avoids the previous two-commit window where a crash could leave
+        # the order discounted without marking the code used (or vice-versa).
+        from datetime import datetime
+
+        try:
+            from datetime import UTC
+        except ImportError:
+            from datetime import timezone
+
+            UTC = timezone.utc  # type: ignore[no-redef]  # noqa: UP017
         original = order_obj.amount_toomans
         new_amount = calc_discounted_amount(original, dc.discount_percent)
+        claim = await session.execute(
+            sa_update(DiscountCode)
+            .where(DiscountCode.id == dc.id, DiscountCode.is_used == False)  # noqa: E712
+            .values(
+                is_used=True,
+                used_at=datetime.now(UTC),
+                used_by_telegram_id=update.effective_user.id,
+                used_order_id=order_obj.id,
+            )
+        )
+        if claim.rowcount == 0:
+            await session.rollback()
+            await update.effective_message.reply_text(
+                "❌ کد تخفیف نامعتبر است یا قبلاً استفاده شده.\n"
+                "می‌توانید کد دیگری بفرستید یا «<code>رد</code>» بنویسید تا بدون تخفیف ادامه دهید.",
+                parse_mode="HTML",
+            )
+            return
         order_obj.original_amount_toomans = original
         order_obj.discount_code = dc.code
         order_obj.discount_percent = dc.discount_percent
         order_obj.discount_code_id = dc.id
         order_obj.amount_toomans = new_amount
         await session.commit()
-        # Consume (one-time); released if order later cancelled/expired
-        await consume_discount_code(session, dc, update.effective_user.id, order_obj.id)
+        # Keep ORM in sync for downstream handlers
+        dc.is_used = True
+        dc.used_at = datetime.now(UTC)
+        dc.used_by_telegram_id = update.effective_user.id
+        dc.used_order_id = order_obj.id
         context.user_data["awaiting_discount_code"] = False
         await update.effective_message.reply_text(
             f"✅ کد تخفیف {escape(dc.code)} اعمال شد — <b>{dc.discount_percent}%</b> تخفیف.\n"

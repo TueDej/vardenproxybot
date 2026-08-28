@@ -261,7 +261,11 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with async_session() as session:
         user = await get_or_create_user(session, update.effective_user)
-        # Supersede earlier pending orders so they can't stack up.
+        # Supersede earlier pending orders so they can't stack up — capture ids to release discount codes
+        pending_ids_res = await session.execute(
+            select(Order.id).where(Order.user_id == user.id, Order.status == "pending")
+        )
+        pending_ids = [r[0] for r in pending_ids_res.all()]
         await session.execute(
             sa_update(Order)
             .where(Order.user_id == user.id, Order.status == "pending")
@@ -278,6 +282,13 @@ async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session.add(order)
         await session.commit()
         await session.refresh(order)
+        if pending_ids:
+            try:
+                from handlers.discount import release_discount_codes_for_cancelled_orders
+
+                await release_discount_codes_for_cancelled_orders(session, pending_ids)
+            except Exception:
+                log.warning("Failed to release discount codes for superseded orders %s", pending_ids, exc_info=True)
 
     # Ask about discount code BEFORE generating the gateway (resume on choice)
     from handlers.discount_flow import send_discount_prompt
@@ -328,6 +339,12 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if db_order and db_order.status == "pending":
             db_order.status = "cancelled"
             await session.commit()
+            try:
+                from handlers.discount import release_discount_code_by_order
+
+                await release_discount_code_by_order(session, db_order)
+            except Exception:
+                log.warning("Failed to release discount code for cancelled order #%s", order_id, exc_info=True)
         else:
             await update.message.reply_text(
                 "❌ سفارش در انتظاری برای لغو وجود ندارد.",
