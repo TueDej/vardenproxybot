@@ -35,6 +35,7 @@ from database import async_session
 from handlers.buy import (
     OrderAlreadyApproved,
     OrderNotApprovable,
+    RenewalLimitExceeded,
     expire_pending_orders,
     is_order_expired,
     verify_and_fulfill_order,
@@ -248,6 +249,7 @@ async def handle_admin_logout(request: web.Request) -> web.Response:
 # ── Auto-expire pending orders (15-min payment window) ────────────
 
 _expire_task: asyncio.Task | None = None
+_reconcile_task: asyncio.Task | None = None
 
 
 async def _auto_expire_loop() -> None:
@@ -1803,16 +1805,11 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
                 "پرداختی برای این تراکنش ثبت نشده است. اگر مبلغ کسر شده، کمی بعد دوباره تلاش کنید.",
             )
         except VPNPanelError as exc:
-            if "exceed" in str(exc).lower() or "60" in str(exc):
-                log.info("Order #%s renewal exceeds 60 days (panel): %s", oid, exc)
-                try:
-                    outcome = await verify_payment(order.payment_authority, order.amount_toomans)
-                except ZarinpalError:
-                    return _page(
-                        "تمدید ممکن نیست",
-                        "مجموع زمان اشتراک پس از تمدید بیش از 60 روز می‌شود — تمدید انجام نشد.",
-                    )
-                return await _paid_cancelled_flow(application, session, order, authority, outcome)
+            # Provisioning failed after money was verified. Keep the order
+            # pending (a retry can complete it) and alert both the user and
+            # the admins — without an admin ping a stranded paid order is
+            # invisible until it expires. Note: over-limit renewals raise
+            # OrderNotApprovable (RenewalLimitExceeded), never VPNPanelError.
             log.error("Order #%s PAID but provisioning failed: %s", oid, exc)
             await _notify(
                 application,
@@ -1820,14 +1817,24 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
                 "✅ پرداخت شما دریافت شد، اما آماده‌سازی کانفیگ اندکی طول کشیده است. "
                 "به‌زودی از بخش «👤 پروفایل من» بررسی کنید یا با پشتیبانی تماس بگیرید.",
             )
+            await _notify_admins(
+                application,
+                f"🚨 <b>پرداخت بدون تأمین!</b> سفارش #{escape(str(oid))} پرداخت و تأیید شد، اما "
+                f"آماده‌سازی روی پنل شکست خورد و سفارش در حالت pending ماند:\n"
+                f"<code>{escape(str(exc))}</code>\n"
+                "لطفاً دستی رسیدگی کنید (تأیید مجدد سفارش یا استرداد وجه).",
+            )
             return _page("در حال بررسی", "پرداخت شما ثبت شد؛ فعال‌سازی چند دقیقه طول خواهد کشید.")
         except OrderAlreadyApproved:
             return _page(
                 "قبلاً تأیید شده", "این سفارش قبلاً تأیید و فعال شده است. به ربات برگردید. ✅"
             )
         except OrderNotApprovable as exc:
-            # 60-day limit: inform user and auto-refund if money moved
-            if "exceed" in str(exc).lower() or "60" in str(exc):
+            # 60-day limit: inform user and auto-refund if money moved.
+            # RenewalLimitExceeded is the structured marker; "exceed" is kept
+            # as a fallback. ("60" substring matching removed — panel emails
+            # and order ids can contain those digits by chance.)
+            if isinstance(exc, RenewalLimitExceeded) or "exceed" in str(exc).lower():
                 log.info("Order #%s renewal exceeds 60 days: %s", oid, exc)
                 try:
                     outcome = await verify_payment(order.payment_authority, order.amount_toomans)
@@ -1901,6 +1908,59 @@ async def _notify_admins(application, text: str) -> None:
             await application.bot.send_message(chat_id=admin_id, text=text, parse_mode="HTML")
         except Exception:
             log.warning("Could not alert admin %s", admin_id, exc_info=True)
+
+
+# ── Startup reconciliation for stranded orders ─────────────────────
+
+
+async def _reconcile_stranded_orders(application) -> None:
+    """Alert admins about orders claimed 'approved' but never provisioned.
+
+    A crash between the atomic status claim and panel provisioning strands
+    such an order: paid money, no client, stuck at status 'approved' with
+    neither panel_email (set only by successful new-purchase provisioning)
+    nor payment_ref_id (set only after successful fulfillment). Auto-revert
+    is unsafe — the panel client may already exist — so surface them for
+    manual action instead.
+
+    Scoped to new purchases only: renewals keep panel_email NULL even when
+    healthy, so they cannot be distinguished this way (in-process renewal
+    failures are already reported by the callback's admin notification).
+    """
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(Order.id, Order.amount_toomans)
+                .where(
+                    Order.status == "approved",
+                    Order.payment_ref_id.is_(None),
+                    Order.panel_email.is_(None),
+                    Order.renew_email.is_(None),
+                )
+                .order_by(Order.created_at.desc())
+                .limit(20)
+            )
+            rows = result.all()
+    except Exception:
+        log.warning("Stranded-order reconciliation query failed", exc_info=True)
+        return
+    if not rows:
+        return
+    detail = "\n".join(
+        f"• سفارش #{oid} — {amount:,} تومان (تأیید شده، بدون کانفیگ)" for oid, amount in rows
+    )
+    log.warning(
+        "Reconciliation: %d stranded approved order(s) (approved, never provisioned)", len(rows)
+    )
+    try:
+        await _notify_admins(
+            application,
+            f"🚨 <b>سفارش‌های نیمه‌کاره پس از ری‌استارت:</b>\n{escape(detail)}\n"
+            "این سفارش‌ها تأیید شده‌اند اما هیچ کانفیگی برایشان ساخته نشده است "
+            "(احتمالاً کرش بین ثبت تأیید و ساخت کانفیگ روی پنل). لطفاً دستی بررسی کنید.",
+        )
+    except Exception:
+        log.warning("Could not notify admins about stranded orders", exc_info=True)
 
 
 async def handle_zarinpal_start(request: web.Request) -> web.Response:
@@ -2027,6 +2087,10 @@ async def start_payment_server(application) -> web.AppRunner:
     # Start 15-min expiry background loop (runs every 60s)
     if _expire_task is None or _expire_task.done():
         _expire_task = asyncio.create_task(_auto_expire_loop())
+    # One-shot startup reconciliation: flag paid-but-never-provisioned orders
+    global _reconcile_task
+    if _reconcile_task is None or _reconcile_task.done():
+        _reconcile_task = asyncio.create_task(_reconcile_stranded_orders(application))
     log.info(
         "Payment callback listening on http://%s:%s%s",
         config.zarinpal_bind_host,

@@ -9,7 +9,7 @@ from database import async_session
 from handlers.buy import get_or_create_user, purchase_blocked_reason
 from handlers.rate_limit import check_cooldown
 from models import Order, User
-from packages import DURATION_DAYS, MAX_SUBSCRIPTION_DAYS, load_packages
+from packages import DURATION_DAYS, MAX_SUBSCRIPTION_DAYS, calc_price, load_packages
 from vpn_service import VPNPanelError, VPNPanelService
 from zarinpal import ZarinpalError
 
@@ -31,11 +31,18 @@ async def _resolve_renewal_terms(email: str, telegram_id: int | None = None) -> 
         q = select(Order).where(Order.panel_email == email, Order.status == "approved")
         if telegram_id is not None:
             q = q.join(User, Order.user_id == User.id).where(User.telegram_id == telegram_id)
+        # Gift orders (amount 0) must never anchor renewal pricing.
+        q = q.where(Order.amount_toomans > 0)
         q = q.order_by(Order.created_at.desc()).limit(1)
         result = await session.execute(q)
         orig = result.scalar_one_or_none()
     if orig is not None:
-        return orig.package_label, orig.duration_days, orig.data_gb, orig.amount_toomans
+        # Bill the pre-discount list price: amount_toomans stores the
+        # *discounted* amount once a code was applied, which would otherwise
+        # permanently discount every future renewal without a code.
+        # original_amount_toomans is falsy (None/0) for undiscounted orders.
+        price = orig.original_amount_toomans or orig.amount_toomans
+        return orig.package_label, orig.duration_days, orig.data_gb, price
 
     # Fallback: price by the client's current data quota.
     client = await VPNPanelService.get_client(email)
@@ -53,12 +60,15 @@ async def _resolve_renewal_terms(email: str, telegram_id: int | None = None) -> 
             data_gb = int(raw or 0) // (1024**3)
         except (TypeError, ValueError):
             data_gb = 0
-    pkgs = load_packages()[0]
+    pkgs, base_price, _paused, discount_max = load_packages()
     match = next((p for p in pkgs if p["data_gb"] == data_gb), None)
     if match:
         return match["label"], DURATION_DAYS, data_gb, match["price"]
-    # Last resort: 30 days at the largest package price.
-    price = max((p["price"] for p in pkgs), default=0)
+    # Last resort: price by the per-GB base (tiered discount applied) instead
+    # of blindly charging the largest package price for odd quotas. Unlimited
+    # (data_gb == 0) keeps its manual package price via calc_price.
+    unlimited_price = next((p["price"] for p in pkgs if p["data_gb"] == 0), None)
+    price = calc_price(base_price, data_gb, unlimited_price, discount_max)
     return "Renewal", DURATION_DAYS, data_gb, price
 
 

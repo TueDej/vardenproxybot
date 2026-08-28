@@ -10,6 +10,7 @@ from database import async_session
 from handlers.buy import (
     OrderAlreadyApproved,
     OrderNotApprovable,
+    RenewalLimitExceeded,
     approve_order,
     format_vpn_config,
     renew_order,
@@ -66,11 +67,11 @@ async def free_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.message.reply_text("⚠️ این سفارش قبلاً تأیید شده است.", parse_mode="HTML")
             return
         except OrderNotApprovable as exc:
-            # 60-day limit is surfaced as OrderNotApprovable with "exceed" in status
-            msg = str(exc) or ""
-            if "exceed" in msg.lower() or "60" in msg:
+            # 60-day limit is surfaced as RenewalLimitExceeded (a subclass);
+            # fall back to the "exceed" text for robustness.
+            if isinstance(exc, RenewalLimitExceeded) or "exceed" in str(exc).lower():
                 await query.message.reply_text(
-                    f"⛔ تمدید ممکن نیست — مجموع زمان اشتراک پس از تمدید بیش از 60 روز می‌شود.\n<code>{escape(msg)}</code>",
+                    f"⛔ تمدید ممکن نیست — مجموع زمان اشتراک پس از تمدید بیش از 60 روز می‌شود.\n<code>{escape(str(exc))}</code>",
                     parse_mode="HTML",
                 )
             else:
