@@ -28,7 +28,7 @@ from message_render import (
     format_expired_message,
     format_product_message as _format_product_message,
 )
-from models import User
+from models import Order, User
 from vpn_service import VPNPanelError, VPNPanelService
 
 log = logging.getLogger(__name__)
@@ -80,6 +80,22 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(UTC)
     online_emails = await VPNPanelService.get_online_emails() if clients else set()
 
+    # Gifts are not renewable — collect gift panel_emails for this user
+    gift_emails: set[str] = set()
+    try:
+        async with async_session() as _s:
+            res = await _s.execute(
+                select(Order.panel_email).where(
+                    Order.user_id == user.id,  # type: ignore[attr-defined]
+                    Order.is_gift == True,  # type: ignore[attr-defined]
+                    Order.panel_email.is_not(None),
+                )
+            )
+            gift_emails = {r[0] for r in res.all() if r[0]}
+    except Exception as e:
+        if "is_gift" not in str(e) and "UndefinedColumn" not in type(e).__name__:
+            log.warning("Gift emails fetch failed for %s: %s", telegram_id, e)
+
     # Split subscriptions by state so expired ones stay visible.
     active, expired, disabled = [], [], []
     for c in clients:
@@ -109,22 +125,28 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             truncated = True
             break
         msg = _format_product_message(c, expiry_dt, online_emails, now)
+        if c["email"] in gift_emails:
+            msg += "\n\n🎁 <i>این اشتراک هدیه است — قابل تمدید نیست.</i>"
         if len(msg) > 4000:
             msg = msg[:3990] + "…"
-        await update.message.reply_text(
-            msg, reply_markup=_renew_keyboard(c["email"]), parse_mode="HTML"
-        )
+        kb = None if c["email"] in gift_emails else _renew_keyboard(c["email"])
+        await update.message.reply_text(msg, reply_markup=kb, parse_mode="HTML")
         sent += 1
 
     for c, expiry_dt in expired:
         if sent >= max_details:
             truncated = True
             break
-        await update.message.reply_text(
-            format_expired_message(c, expiry_dt),
-            reply_markup=_renew_keyboard(c["email"]),
-            parse_mode="HTML",
-        )
+        exp_msg = format_expired_message(c, expiry_dt)
+        if c["email"] in gift_emails:
+            exp_msg += "\n\n🎁 <i>این اشتراک هدیه است — قابل تمدید نیست.</i>"
+            await update.message.reply_text(exp_msg, parse_mode="HTML")
+        else:
+            await update.message.reply_text(
+                exp_msg,
+                reply_markup=_renew_keyboard(c["email"]),
+                parse_mode="HTML",
+            )
         sent += 1
 
     for c, expiry_dt in disabled:

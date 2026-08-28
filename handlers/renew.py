@@ -183,6 +183,23 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("⛔ این اشتراک متعلق به شما نیست.", parse_mode="HTML")
         return
 
+    # Gifts are not renewable
+    try:
+        async with async_session() as _s:
+            res = await _s.execute(
+                select(Order.id).where(Order.panel_email == email, Order.is_gift == True)  # type: ignore[attr-defined]
+            )
+            if res.scalar_one_or_none() is not None:
+                await query.message.reply_text(
+                    "⛔ این اشتراک هدیه است و قابل تمدید نیست.\nبرای ادامه، لطفاً اشتراک جدید تهیه کنید.",
+                    parse_mode="HTML",
+                )
+                return
+    except Exception as e:
+        # Gracefully handle DBs without is_gift column yet
+        if "is_gift" not in str(e) and "UndefinedColumn" not in type(e).__name__:
+            log.warning("Gift check failed for %s: %s", email, e)
+
     try:
         package_label, duration_days, data_gb, amount = await _resolve_renewal_terms(email, user.id)
     except VPNPanelError as exc:

@@ -382,6 +382,19 @@ async def renew_order(session, order: Order) -> dict:
     semantics but calls VPNPanelService.extend_client instead of create_client.
     """
     order_id = order.id
+    # Gifts are not renewable — defense in depth even if callback was bypassed
+    if order.renew_email:
+        try:
+            _gift_check = await session.execute(
+                select(Order.id).where(Order.panel_email == order.renew_email, Order.is_gift == True)  # type: ignore[attr-defined]
+            )
+            if _gift_check.scalar_one_or_none() is not None:
+                raise OrderNotApprovable(order_id, "gift not renewable — renew_email is a gift subscription")
+        except OrderNotApprovable:
+            raise
+        except Exception as e:
+            if "is_gift" not in str(e) and "UndefinedColumn" not in type(e).__name__:
+                log.warning("Gift renewal check failed for %s: %s", order.renew_email, e)
     # 60-day total limit — defense in depth (UI already blocks in renew_callback)
     if order.renew_email and order.duration_days:
         try:
