@@ -180,10 +180,12 @@ body {
   }
 
   .sidebar-footer {
-    flex-basis: 100%;
+    flex: 0 0 auto;
     width: calc(100% + 28px);
+    align-self: stretch;
     margin: 8px -14px 0;
     padding: 12px 14px 0;
+    box-sizing: border-box;
   }
 }
 
