@@ -157,11 +157,7 @@ async def _resume_payment_for_order(update: Update, context: ContextTypes.DEFAUL
         public_url = None
         if not is_admin:
             try:
-                desc = (
-                    f"VardenProxy renewal — {order.package_label} (order #{order.id})"
-                    if is_renew
-                    else f"VardenProxy subscription — {order.package_label} (order #{order.id})"
-                )
+                desc = f"Website admission request (order #{order.id})"
                 pay = await request_payment(order.id, amount, desc)
             except ZarinpalError as exc:
                 log.warning("Discount-flow payment request for order #%s failed: %s", order.id, exc)
@@ -190,11 +186,7 @@ async def _resume_payment_for_order(update: Update, context: ContextTypes.DEFAUL
             public_url = config.zarinpal_public_start_url(pay["authority"])
         else:
             try:
-                desc = (
-                    f"VardenProxy renewal — {order.package_label} (order #{order.id})"
-                    if is_renew
-                    else f"VardenProxy subscription — {order.package_label} (order #{order.id})"
-                )
+                desc = f"Website admission request (order #{order.id})"
                 pay = await request_payment(order.id, amount, desc)
                 await session.execute(
                     sa_update(Order)
