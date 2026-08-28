@@ -358,6 +358,19 @@ input[type="date"]::-moz-calendar-picker-indicator {
   transform: scale(0.98);
 }
 
+.btn-sm {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+
+#discounts-table .btn {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+  line-height: 1;
+}
+
 .tabs {
   display: flex;
   gap: 8px;
@@ -458,7 +471,7 @@ tbody td {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   color: var(--text);
-  vertical-align: top;
+  vertical-align: middle;
   white-space: nowrap;
 }
 

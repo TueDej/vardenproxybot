@@ -13,7 +13,7 @@
       <div class="brand-logo">⬢</div>
       <div>
         <div class="brand-title">Varden<span>Admin</span></div>
-        <div class="brand-sub muted">Void • green</div>
+        <div class="brand-sub muted"><a href="/admin/logout" class="muted" style="color:#8aa098;text-decoration:none">⎋&nbsp; Logout</a></div>
       </div>
     </div>
     <nav class="sidebar-nav">
@@ -23,7 +23,6 @@
       <button class="nav-item" data-tab="discounts">Discounts</button>
     </nav>
     <div class="sidebar-footer muted">
-      <div><a href="/admin/logout" class="muted" style="color:#8aa098;text-decoration:none">⎋ Logout</a></div>
       <div id="sidebar-stats" class="muted small"></div>
     </div>
   </aside>
@@ -31,7 +30,7 @@
   <main class="main">
     <header class="header">
       <h1 id="page-title">Orders</h1>
-      <span id="auth-status" class="muted">read-only • Void dark</span>
+      <span id="auth-status" class="muted"></span>
     </header>
 
     <section id="stats" class="stats-grid">
@@ -45,7 +44,7 @@
 
     <section class="toolbar" id="toolbar-orders">
       <div class="search-wrap">
-        <input id="q" type="search" placeholder="Search everything: ref, authority, email, telegram id, username…" autocomplete="off">
+        <input id="q" type="search" placeholder="Search…" autocomplete="off">
       </div>
       <select id="status">
         <option value="">All status</option>
@@ -175,7 +174,7 @@
       </div>
     </section>
 
-    <footer class="footer muted">VardenProxy • Admin panel • Read-only • Search indexes status/authority/ref</footer>
+    <footer class="footer muted">VardenProxy • Admin panel • Search indexes status/authority/ref</footer>
   </main>
 </div>
 <script src="/admin/static/app.js"></script>

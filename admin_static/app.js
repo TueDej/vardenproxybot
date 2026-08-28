@@ -92,7 +92,7 @@ async function loadOrders() {
         <td>${pill(o.status)}</td>
         <td>${o.payment_ref_id ? `<code>${escapeHtml(o.payment_ref_id)}</code><span class="copy" data-copy="${escapeAttr(o.payment_ref_id)}" onclick="copyText(this.dataset.copy)">copy</span>` : '<span class="muted">—</span>'}</td>
         <td><code title="${escapeAttr(o.payment_authority || "")}">${o.payment_authority ? escapeHtml(o.payment_authority.slice(0, 12)) + "…" : "—"}</code>${o.payment_authority ? `<span class="copy" data-copy="${escapeAttr(o.payment_authority)}" onclick="copyText(this.dataset.copy)">copy</span>` : ""}</td>
-        <td><code>${escapeHtml(o.panel_email || "—")}</code></td>
+        <td>${o.panel_email ? `<code>${escapeHtml(o.panel_email)}</code><span class="copy" data-copy="${escapeAttr(o.panel_email)}" onclick="copyText(this.dataset.copy)">copy</span>` : '<span class="muted">—</span>'}</td>
         <td>${fmtDate(o.created_at)}</td>
       </tr>
     `
@@ -227,7 +227,7 @@ function renderPackages() {
       const priceCell =
         p.data_gb === 0
           ? `<input type="number" data-idx="${idx}" data-field="price" value="${p.price}" min="1000" max="10000000" step="1000">`
-          : `<span>${fmtAmount(price)}</span> <span class="muted small">[${disc} off]</span>`;
+          : `<span>${fmtAmount(price)}</span>`;
       return `
       <tr data-idx="${idx}" draggable="true">
         <td class="drag-handle" title="Drag to reorder">⋮⋮</td>
@@ -320,7 +320,7 @@ function onPkgInput(e) {
         if (newPriceInput) newPriceInput.addEventListener('input', onPkgInput);
       } else {
         const price = calcPrice(packagesState.base_price_per_gb, gb);
-        priceCell.innerHTML = `<span>${fmtAmount(price)}</span> <span class="muted small">[${disc} off]</span>`;
+        priceCell.innerHTML = `<span>${fmtAmount(price)}</span>`;
       }
     } else {
       // Fallback: full rerender if row not found
@@ -367,7 +367,7 @@ $("#base-price")?.addEventListener("input", () => {
     const priceCell = row.cells[4];
     if (p.data_gb === 0) return; // manual price, keep input
     const price = calcPrice(base, p.data_gb);
-    priceCell.innerHTML = `<span>${fmtAmount(price)}</span> <span class="muted small">[${disc} off]</span>`;
+    priceCell.innerHTML = `<span>${fmtAmount(price)}</span>`;
   });
 });
 
@@ -386,7 +386,7 @@ $("#discount-max")?.addEventListener("input", () => {
     if (p.data_gb === 0) return;
     const base = packagesState.base_price_per_gb;
     const price = calcPrice(base, p.data_gb);
-    priceCell.innerHTML = `<span>${fmtAmount(price)}</span> <span class="muted small">[${disc} off]</span>`;
+    priceCell.innerHTML = `<span>${fmtAmount(price)}</span>`;
   });
 });
 
