@@ -436,17 +436,44 @@ async def handle_admin_stats(request: web.Request) -> web.Response:
         ).all()
         by_status = {row[0]: row[1] for row in status_rows}
         # total revenue approved only, excluding gifts (amount 0 or is_gift)
-        total_revenue = (
-            await session.execute(
-                select(func.coalesce(func.sum(Order.amount_toomans), 0)).where(
-                    and_(
-                        Order.status == "approved",
-                        Order.amount_toomans > 0,
-                        or_(Order.is_gift == False, Order.is_gift.is_(None)),  # type: ignore[comparison-overlap]
+        # Gracefully handle DBs where is_gift column hasn't been migrated yet (UndefinedColumn)
+        try:
+            total_revenue = (
+                await session.execute(
+                    select(func.coalesce(func.sum(Order.amount_toomans), 0)).where(
+                        and_(
+                            Order.status == "approved",
+                            Order.amount_toomans > 0,
+                            or_(Order.is_gift == False, Order.is_gift.is_(None)),  # type: ignore[comparison-overlap]
+                        )
                     )
                 )
-            )
-        ).scalar() or 0
+            ).scalar() or 0
+        except Exception as e:
+            # Fallback for DBs without is_gift column yet
+            if "is_gift" in str(e) or "UndefinedColumn" in type(e).__name__:
+                log.warning("is_gift column missing, falling back to amount>0 only for revenue")
+                # Ensure migration is attempted for next request
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
+                # Try to create column inline (best-effort, ignore if fails due to race)
+                try:
+                    async with async_session() as s2:
+                        async with s2.begin():
+                            await s2.execute(__import__("sqlalchemy").text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_gift BOOLEAN DEFAULT FALSE"))
+                except Exception:
+                    pass
+                total_revenue = (
+                    await session.execute(
+                        select(func.coalesce(func.sum(Order.amount_toomans), 0)).where(
+                            and_(Order.status == "approved", Order.amount_toomans > 0)
+                        )
+                    )
+                ).scalar() or 0
+            else:
+                raise
         # total users
         total_users = (await session.execute(select(func.count(User.id)))).scalar() or 0
         # today revenue / pending
@@ -1190,19 +1217,76 @@ async def handle_admin_generate_subscription(request: web.Request) -> web.Respon
                 except Exception as e:
                     await session.rollback()
                     return web.json_response({"error": f"Could not create user: {e}"}, status=500)
-            # Create pending gift order
-            order = Order(
-                user_id=user.id,
-                package_label=label,
-                duration_days=duration_days,
-                data_gb=data_gb,
-                amount_toomans=0,
-                status="pending",
-                is_gift=True,
-            )
-            session.add(order)
-            await session.commit()
-            await session.refresh(order)
+            # Create pending gift order (handle DBs without is_gift column yet)
+            try:
+                order = Order(
+                    user_id=user.id,
+                    package_label=label,
+                    duration_days=duration_days,
+                    data_gb=data_gb,
+                    amount_toomans=0,
+                    status="pending",
+                    is_gift=True,
+                )
+                session.add(order)
+                await session.commit()
+                await session.refresh(order)
+            except Exception as e:
+                if "is_gift" in str(e) or "UndefinedColumn" in type(e).__name__:
+                    await session.rollback()
+                    log.warning("is_gift column missing during gift create, attempting migration fallback")
+                    # Try to add column then retry
+                    try:
+                        # Use a separate connection to avoid transaction conflict
+                        async with async_session() as s2:
+                            async with s2.begin():
+                                await s2.execute(__import__("sqlalchemy").text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_gift BOOLEAN DEFAULT FALSE"))
+                            await s2.commit()
+                    except Exception:
+                        pass
+                    # Retry with is_gift after ensuring column exists
+                    try:
+                        order = Order(
+                            user_id=user.id,
+                            package_label=label,
+                            duration_days=duration_days,
+                            data_gb=data_gb,
+                            amount_toomans=0,
+                            status="pending",
+                            is_gift=True,
+                        )
+                        session.add(order)
+                        await session.commit()
+                        await session.refresh(order)
+                    except Exception as e2:
+                        if "is_gift" in str(e2):
+                            await session.rollback()
+                            # Last resort: create without is_gift column (amount 0 ensures revenue exclusion)
+                            from sqlalchemy import text as sa_text
+
+                            result = await session.execute(
+                                sa_text(
+                                    "INSERT INTO orders (user_id, package_label, duration_days, data_gb, amount_toomans, status, created_at) "
+                                    "VALUES (:uid, :label, :dur, :gb, 0, 'pending', NOW()) RETURNING id"
+                                ),
+                                {"uid": user.id, "label": label, "dur": duration_days, "gb": data_gb},
+                            )
+                            await session.commit()
+                            # Fetch the newly created order
+                            new_id = result.scalar() if hasattr(result, "scalar") else None
+                            if new_id is None:
+                                # Fallback query
+                                res2 = await session.execute(
+                                    select(Order).where(Order.user_id == user.id, Order.status == "pending").order_by(Order.id.desc()).limit(1)
+                                )
+                                order = res2.scalar_one()
+                            else:
+                                res2 = await session.execute(select(Order).where(Order.id == new_id))
+                                order = res2.scalar_one()
+                        else:
+                            raise
+                else:
+                    raise
             order_id = order.id
             user_id = user.id
         # Provision via approve_order (handles panel create + atomic claim)

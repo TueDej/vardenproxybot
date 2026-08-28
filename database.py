@@ -105,10 +105,19 @@ def _migrate_sync(sync_conn) -> None:
                 "Added orders.discount_code_id",
             )
         if "is_gift" not in cols:
-            _add_col(
-                "ALTER TABLE orders ADD COLUMN is_gift BOOLEAN DEFAULT 0 NOT NULL",
-                "Added orders.is_gift",
-            )
+            # Use IF NOT EXISTS for Postgres and handle SQLite fallback; also ensure backfill via DEFAULT
+            try:
+                # Postgres 9.6+ supports IF NOT EXISTS
+                sync_conn.exec_driver_sql(
+                    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_gift BOOLEAN DEFAULT FALSE NOT NULL"
+                )
+                log.info("Added orders.is_gift (IF NOT EXISTS)")
+            except Exception:
+                # SQLite or older Postgres fallback
+                _add_col(
+                    "ALTER TABLE orders ADD COLUMN is_gift BOOLEAN DEFAULT 0 NOT NULL",
+                    "Added orders.is_gift (fallback)",
+                )
 
     # Telegram user IDs exceed INTEGER range (~2.1e9) — ensure BIGINT on Postgres.
     if not str(sync_conn.engine.url).startswith("sqlite"):
