@@ -4,37 +4,51 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Varden Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/admin/static/style.css">
 </head>
 <body>
-<div class="layout">
+<div class="layout" id="layout">
   <aside class="sidebar">
     <div class="sidebar-brand">
       <div class="brand-logo"><span data-icon="shield-for-security"></span></div>
       <div>
         <div class="brand-title">Varden<span>Admin</span></div>
-        <div class="muted small">VardenProxy control panel</div>
+        <div class="brand-sub">VardenProxy console</div>
       </div>
     </div>
 
+    <button class="sidebar-collapse" type="button" onclick="document.getElementById('layout').classList.toggle('collapsed')">
+      <span data-icon="grip-horizontal"></span>Collapse
+    </button>
+
     <nav class="sidebar-nav">
-      <button class="nav-item active" data-tab="orders"><span data-icon="receipt"></span>Orders</button>
-      <button class="nav-item" data-tab="users"><span data-icon="users-round"></span>Users</button>
-      <button class="nav-item" data-tab="packages"><span data-icon="cardboard-box-closed"></span>Packages</button>
-      <button class="nav-item" data-tab="discounts"><span data-icon="label"></span>Discounts</button>
-      <button class="nav-item" data-tab="messages"><span data-icon="envelope-mail"></span>Messages</button>
+      <button class="nav-item active" data-tab="orders"><span data-icon="receipt"></span><span class="nav-label">Orders</span></button>
+      <button class="nav-item" data-tab="users"><span data-icon="users-round"></span><span class="nav-label">Users</span></button>
+      <button class="nav-item" data-tab="packages"><span data-icon="cardboard-box-closed"></span><span class="nav-label">Packages</span></button>
+      <button class="nav-item" data-tab="discounts"><span data-icon="label"></span><span class="nav-label">Discounts</span></button>
+      <button class="nav-item" data-tab="messages"><span data-icon="envelope-mail"></span><span class="nav-label">Messages</span></button>
     </nav>
 
     <div class="sidebar-footer">
-      <div id="sidebar-stats" class="muted small"></div>
-      <a class="btn sm" href="/admin/logout"><span data-icon="exit"></span>Logout</a>
+      <div id="sidebar-stats" class="muted"></div>
+      <a class="btn sm" href="/admin/logout"><span data-icon="exit"></span><span class="btn-label">Logout</span></a>
     </div>
   </aside>
 
   <main class="main">
-    <header class="header">
-      <h1 id="page-title">Orders</h1>
+    <header class="topbar">
+      <div class="top-status">
+        <span class="status-dot"></span>bot:online
+        <span class="top-latency">· 42ms</span>
+      </div>
+      <span class="env-tag">PRODUCTION</span>
+      <h1 class="top-title" id="page-title">Orders</h1>
+      <div class="spacer"></div>
       <span id="auth-status" class="muted"></span>
+      <div class="top-admin" title="Admin">A</div>
     </header>
 
     <section id="stats" class="stats-grid">
@@ -239,7 +253,7 @@
               <option value="broadcast">Broadcast</option>
             </select>
           </label>
-          <label class="field" id="msg-single-wrap">Telegram ID
+          <label class="field hidden" id="msg-single-wrap">Telegram ID
             <input id="msg-target" type="text" placeholder="e.g. 123456789" inputmode="numeric">
           </label>
           <label class="field hidden" id="msg-broadcast-q-wrap">Search users
@@ -277,7 +291,7 @@
           <button id="msg-send" class="btn primary"><span data-icon="mail-send-paper-plane"></span>Send</button>
           <span id="msg-result" class="feedback muted"></span>
         </div>
-        <div id="msg-preview-box" class="table-wrap hidden"><div class="hint" id="msg-preview-inner"></div></div>
+        <div id="msg-preview-box" class="hidden"><div class="hint" id="msg-preview-inner"></div></div>
       </div>
 
       <div class="card-block">
@@ -301,7 +315,7 @@
       </div>
     </section>
 
-    <footer class="footer muted">VardenProxy • Admin panel • Search indexes status/authority/ref</footer>
+    <footer class="footer">VardenProxy // admin console // search indexes: status · authority · ref</footer>
   </main>
 </div>
 <script src="/admin/static/icons.js"></script>

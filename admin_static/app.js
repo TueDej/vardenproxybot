@@ -698,7 +698,7 @@ async function loadMessagesLog(page=1) {
   try {
     const data = await fetchJSON(`/admin/api/messages/log?page=${page}&limit=20`);
     if (!data.items.length) {
-      tbody.innerHTML = Y_KEEP;
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty">' + icon("envelope-mail") + '<span>No messages yet — nothing sent so far</span></div></td></tr>';
       if (pag) pag.innerHTML="";
       return;
     }
