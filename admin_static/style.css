@@ -285,7 +285,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   color: #0e1411;
 }
 
-.brand-logo .ico { height: 20px; }
+.brand-logo .ico {
+  display: block; /* no inline baseline: avoids descender line-box drift inside the flex square */
+  height: 20px;
+  /* the shield's visual mass sits high in its viewBox (pointed bottom) — nudge it down */
+  transform: translateY(3%);
+}
 
 .brand-title { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; }
 .brand-title span { color: var(--accent-bright); font-weight: 400; }
