@@ -9,8 +9,10 @@ import collections
 import contextlib
 import hmac
 import ipaddress
+import json
 import logging
 import pathlib
+import re
 import secrets
 import time
 
@@ -20,7 +22,7 @@ except ImportError:  # Python <3.11
     from datetime import timezone
 
     UTC = timezone.utc  # type: ignore[no-redef]  # noqa: UP017
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
 
 from aiohttp import web
@@ -37,8 +39,26 @@ from handlers.buy import (
     verify_and_fulfill_order,
 )
 from keyboards import main_menu_keyboard
-from models import DiscountCode, Order, User
-from vpn_service import VPNPanelError
+from message_render import (
+    data_label as _msg_data_label,
+)
+from message_render import (
+    expiry_dt as _msg_expiry_dt,
+)
+from message_render import (
+    format_disabled_message as _msg_format_disabled,
+)
+from message_render import (
+    format_expired_message as _msg_format_expired,
+)
+from message_render import (
+    format_links_block as _msg_format_links,
+)
+from message_render import (
+    format_product_message as _msg_format_product,
+)
+from models import DiscountCode, MessageLog, Order, User
+from vpn_service import VPNPanelError, VPNPanelService
 from zarinpal import ZarinpalError, reverse_payment, verify_payment
 
 log = logging.getLogger(__name__)
@@ -255,6 +275,17 @@ _RATE_LIMITS: dict[str, tuple[int, int]] = {
 
 _rate_hits: dict[str, collections.deque] = {}
 _rate_lock = asyncio.Lock()
+
+# ── Admin messaging (broadcast) ─────────────────────────────────
+_broadcast_lock = asyncio.Lock()
+_MSG_SEND_SEM = asyncio.Semaphore(3)  # telegram 30 msg/sec -> 3 concurrent + sleep
+_PANEL_HYDRATE_SEM = asyncio.Semaphore(5)  # mirrors vpn_service.py:370
+_MAX_BROADCAST = 5000
+_MAX_BROADCAST_WITH_CONFIGS = 200
+_MAX_CONFIG_MESSAGES = 10
+_ALLOWED_HTML_TAGS = {"b", "strong", "i", "em", "u", "s", "strike", "del", "code", "pre", "a"}
+_msg_send_hits: dict[str, collections.deque] = {}
+_msg_send_lock = asyncio.Lock()
 
 
 def _client_ip(request: web.Request) -> str:
@@ -796,6 +827,539 @@ async def handle_admin_packages_save(request: web.Request) -> web.Response:
     )
 
 
+# ── Admin messaging ────────────────────────────────────────────────
+
+
+def _sanitize_html(text: str) -> str:
+    """Allow only Telegram-supported HTML tags; escape everything else."""
+    if not text:
+        return ""
+    # Escape all then re-allow whitelisted tags
+    text = text[:4000]
+    # Build regex for allowed tags: <b>, </b>, <a href="..."> etc
+    # First escape, then unescape allowed
+    escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # Re-allow simple tags without attributes: b, strong, i, em, u, s, strike, del, code, pre
+    for tag in ("b", "strong", "i", "em", "u", "s", "strike", "del", "code", "pre"):
+        escaped = escaped.replace(f"&lt;{tag}&gt;", f"<{tag}>").replace(f"&lt;/{tag}&gt;", f"</{tag}>")
+        escaped = escaped.replace(f"&lt;{tag.upper()}&gt;", f"<{tag}>").replace(f"&lt;/{tag.upper()}&gt;", f"</{tag}>")
+    # Allow <a href="..."> with href validation
+    def _allow_a(m):
+        inner = m.group(1) or ""
+        href = ""
+        # extract href="..." if present
+        hm = re.search(r'href\s*=\s*"([^"]+)"', inner, flags=re.IGNORECASE)
+        if hm:
+            url = hm.group(1).strip()
+            if url.startswith("http://") or url.startswith("https://") or url.startswith("tg://"):
+                href = f' href="{escape(url)}"'
+            else:
+                return escape(m.group(0))
+        return f"<a{href}>"
+
+    escaped = re.sub(r"&lt;a(.*?)&gt;", _allow_a, escaped, flags=re.IGNORECASE)
+    escaped = escaped.replace("&lt;/a&gt;", "</a>").replace("&lt;/A&gt;", "</a>")
+    # Allow <br>, <br/>, <br />
+    escaped = re.sub(r"&lt;br\s*/?&gt;", "<br>", escaped, flags=re.IGNORECASE)
+    # Allow span with limited? strip
+    return escaped
+
+
+def _validate_text_html(text: str | None, require_non_empty: bool = True) -> str | None:
+    if text is None:
+        text = ""
+    text = text.strip()
+    if not text:
+        if require_non_empty:
+            return None
+        return ""
+    if len(text) > 4000:
+        raise ValueError("Message too long (max 4000 characters)")
+    # Basic check for broken tags count
+    if text.count("<") != text.count(">"):
+        raise ValueError("Malformed HTML tags")
+    return _sanitize_html(text)
+
+
+def _get_admin_identity(request: web.Request) -> str:
+    # Use configured admin user as identity; if multiple admins later, extend via session map
+    try:
+        return config.admin_panel_user or "admin"
+    except Exception:
+        return "admin"
+
+
+async def _check_msg_send_ratelimit(request: web.Request) -> web.Response | None:
+    ip = _client_ip(request)
+    key = f"msg_send:{ip}"
+    now = time.monotonic()
+    async with _msg_send_lock:
+        dq = _msg_send_hits.get(key)
+        if dq is None:
+            dq = collections.deque()
+            _msg_send_hits[key] = dq
+        while dq and dq[0] <= now - 60:
+            dq.popleft()
+        # 5 sends per minute per IP
+        if len(dq) >= 5:
+            retry = int(dq[0] + 60 - now) + 1
+            return web.json_response(
+                {"error": "Too many messaging requests, retry in a few seconds"},
+                status=429,
+                headers={"Retry-After": str(max(1, retry))},
+            )
+        dq.append(now)
+        if len(_msg_send_hits) > 2000:
+            for k in list(_msg_send_hits.keys())[:400]:
+                _msg_send_hits.pop(k, None)
+    return None
+
+
+async def _resolve_broadcast_targets(
+    session, flt: dict
+) -> list[User]:
+    base = select(User)
+    conditions = []
+    q = (flt.get("q") or "").strip()
+    from_s = _parse_date_param(flt.get("from"))
+    to_s = _parse_date_param(flt.get("to"))
+    has_approved = flt.get("has_approved")
+    # has_approved can be bool or string "true"
+    if isinstance(has_approved, str):
+        has_approved = has_approved.lower() in ("1", "true", "yes", "on")
+    if from_s:
+        conditions.append(User.created_at >= from_s)
+    if to_s:
+        conditions.append(User.created_at <= to_s)
+    if q:
+        q_escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{q_escaped}%"
+        or_parts = [
+            User.username.ilike(like, escape="\\"),
+            User.first_name.ilike(like, escape="\\"),
+        ]
+        if q.isdigit():
+            try:
+                tid = int(q)
+                or_parts.append(User.telegram_id == tid)
+                or_parts.append(User.id == tid)
+            except ValueError:
+                pass
+        conditions.append(or_(*or_parts))
+    if conditions:
+        base = base.where(and_(*conditions))
+    # has_approved filter via exists subquery
+    if has_approved:
+        base = base.where(
+            select(Order.id).where(and_(Order.user_id == User.id, Order.status == "approved")).exists()
+        )
+    base = base.order_by(User.created_at.desc()).limit(_MAX_BROADCAST + 1)
+    result = await session.execute(base)
+    users = result.scalars().all()
+    if len(users) > _MAX_BROADCAST:
+        raise ValueError(f"Broadcast too large (>{_MAX_BROADCAST}), narrow filter")
+    return users
+
+
+async def _hydrate_configs_for_user(telegram_id: int, panel_email: str | None) -> list[dict]:
+    """Hydrate and bucket panel configs for a user, filtered by panel_email if set."""
+    if not config.panel_configured:
+        return []
+    try:
+        async with _PANEL_HYDRATE_SEM:
+            clients = await VPNPanelService.get_clients_by_telegram_id(telegram_id)
+    except VPNPanelError:
+        return []
+    if panel_email and panel_email != "all":
+        clients = [c for c in clients if c.get("email") == panel_email]
+    # sort active first like profile
+    now = datetime.now(UTC)
+    online = set()
+    try:
+        if clients:
+            online = await VPNPanelService.get_online_emails()
+    except Exception:
+        online = set()
+    bucket = []
+    for c in clients:
+        expiry = _msg_expiry_dt(c.get("expiryTime", 0))
+        status = "disabled" if not c.get("enable") else ("active" if expiry is None or expiry > now else "expired")
+        bucket.append((c, expiry, online, status))
+    # order active, expired, disabled
+    bucket.sort(key=lambda x: {"active": 0, "expired": 1, "disabled": 2}.get(x[3], 3))
+    return bucket[:_MAX_CONFIG_MESSAGES]
+
+
+async def handle_admin_messages_emails(request: web.Request) -> web.Response:
+    tid_s = (request.rel_url.query.get("telegram_id") or "").strip()
+    if not tid_s or not tid_s.lstrip("-").isdigit():
+        return web.json_response({"error": "telegram_id required (numeric)"}, status=400)
+    try:
+        telegram_id = int(tid_s)
+    except ValueError:
+        return web.json_response({"error": "invalid telegram_id"}, status=400)
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
+        if user is None:
+            return web.json_response({"error": "user not found"}, status=404)
+    if not config.panel_configured:
+        return web.json_response({"items": [], "panel_configured": False})
+    try:
+        bucket = await _hydrate_configs_for_user(telegram_id, None)
+    except Exception as e:
+        log.warning("Failed to hydrate configs for %s: %s", telegram_id, e)
+        return web.json_response({"items": [], "error": str(e)})
+    items = []
+    for c, expiry, _online, status in bucket:
+        items.append(
+            {
+                "email": c.get("email"),
+                "sub_id": c.get("sub_id"),
+                "total_gb": c.get("total_gb", 0),
+                "data_label": _msg_data_label(c.get("total_gb", 0)),
+                "limit_ip": c.get("limit_ip", 0),
+                "expiry_ms": c.get("expiry_time", 0),
+                "expiry_iso": expiry.isoformat() if expiry else None,
+                "status": status,
+                "links_count": len(c.get("links", [])),
+            }
+        )
+    return web.json_response({"items": items, "panel_configured": True})
+
+
+async def handle_admin_messages_preview(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    text_raw = data.get("text_html") if "text_html" in data else data.get("text", "")
+    panel_email = (data.get("panel_email") or "").strip() or None
+    telegram_id = data.get("telegram_id")
+    include_configs = bool(data.get("include_configs"))
+    if panel_email and panel_email != "all" and not re.match(r"^vp\d+-\d+-[0-9a-f]{2,}$", panel_email):
+        # allow any vp* pattern loosely
+        if not panel_email.startswith("vp"):
+            return web.json_response({"error": "invalid panel_email format"}, status=400)
+    text_html = ""
+    if text_raw:
+        try:
+            text_html = _validate_text_html(str(text_raw), require_non_empty=False) or ""
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+    if not text_html and not include_configs:
+        return web.json_response({"error": "Provide text or enable include_configs"}, status=400)
+    if include_configs and not config.panel_configured:
+        return web.json_response({"error": "Panel not configured"}, status=400)
+    rendered_parts = []
+    if text_html:
+        rendered_parts.append(text_html)
+    if include_configs:
+        if telegram_id is None:
+            return web.json_response({"error": "telegram_id required for config preview"}, status=400)
+        try:
+            telegram_id = int(telegram_id)
+        except (ValueError, TypeError):
+            return web.json_response({"error": "invalid telegram_id"}, status=400)
+        bucket = await _hydrate_configs_for_user(telegram_id, panel_email)
+        if not bucket:
+            rendered_parts.append("<i>No active configs found for this user.</i>")
+        else:
+            now = datetime.now(UTC)
+            for c, expiry, online, status in bucket:
+                if status == "active":
+                    rendered_parts.append(_msg_format_product(c, expiry, online, now))
+                elif status == "expired":
+                    rendered_parts.append(_msg_format_expired(c, expiry))
+                else:
+                    rendered_parts.append(_msg_format_disabled(c, expiry))
+    combined = "\n\n".join(rendered_parts)
+    if len(combined) > 4000 and include_configs:
+        # will be split into multiple messages; preview truncates first
+        combined = combined[:3990] + "…"
+    return web.json_response({"rendered_html": combined, "parts": rendered_parts})
+
+
+async def handle_admin_messages_log(request: web.Request) -> web.Response:
+    try:
+        limit = int(request.rel_url.query.get("limit", "20"))
+    except ValueError:
+        limit = 20
+    limit = max(1, min(limit, 100))
+    page, _ = _parse_pagination(request)
+    # pagination uses page/limit, offset = (page-1)*limit
+    async with async_session() as session:
+        base = select(MessageLog).order_by(MessageLog.created_at.desc())
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await session.execute(count_q)).scalar() or 0
+        base = base.offset((page - 1) * limit).limit(limit)
+        result = await session.execute(base)
+        logs = result.scalars().all()
+        items = []
+        for l in logs:
+            items.append(
+                {
+                    "id": l.id,
+                    "created_at": l.created_at.isoformat() if l.created_at else None,
+                    "admin_user": l.admin_user,
+                    "kind": l.kind,
+                    "status": l.status,
+                    "filter_json": l.filter_json,
+                    "text_html": (l.text_html[:200] + "…") if l.text_html and len(l.text_html) > 200 else l.text_html,
+                    "panel_email": l.panel_email,
+                    "total": l.total,
+                    "sent": l.sent,
+                    "failed": l.failed,
+                    "error_summary": l.error_summary,
+                }
+            )
+        return web.json_response({"total": total, "page": page, "limit": limit, "items": items})
+
+
+async def handle_admin_messages_send(request: web.Request) -> web.Response:
+    # Extra per-IP messaging rate limit
+    rl = await _check_msg_send_ratelimit(request)
+    if rl is not None:
+        return rl
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    mode = (data.get("mode") or data.get("type") or "single").strip().lower()
+    if mode not in ("single", "broadcast"):
+        return web.json_response({"error": "mode must be single or broadcast"}, status=400)
+    text_raw = data.get("text_html") if "text_html" in data else data.get("text", "")
+    panel_email = (data.get("panel_email") or "").strip() or None
+    include_configs = bool(data.get("include_configs"))
+    # Allow "all" sentinel
+    if panel_email == "all":
+        panel_email = "all"
+    elif panel_email and not re.match(r"^vp", panel_email):
+        # generic check: allow any non-empty panel email with vp prefix; otherwise reject
+        if panel_email and not panel_email.startswith("vp"):
+            return web.json_response({"error": "invalid panel_email"}, status=400)
+    text_html = ""
+    if text_raw is not None and str(text_raw).strip():
+        try:
+            text_html = _validate_text_html(str(text_raw), require_non_empty=False) or ""
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+    else:
+        text_html = ""
+    if not text_html and not include_configs:
+        return web.json_response({"error": "Provide message text or enable configs"}, status=400)
+    if len(text_html) > 4000:
+        return web.json_response({"error": "Message too long (max 4000)"}, status=400)
+    if include_configs and not config.panel_configured:
+        return web.json_response({"error": "Panel not configured, cannot forward configs"}, status=400)
+
+    # Resolve targets
+    targets: list[User] = []
+    filter_json: dict | None = None
+    kind = "custom"
+    if include_configs:
+        kind = "config_forward" if mode == "single" else "broadcast"
+    elif mode == "broadcast":
+        kind = "broadcast"
+
+    # Resolve targets (outside lock to keep lock time short)
+    async with async_session() as session:
+        if mode == "single":
+            tid_raw = data.get("telegram_id") or data.get("target") or data.get("user_id")
+            if tid_raw is None or str(tid_raw).strip() == "":
+                return web.json_response({"error": "telegram_id required for single mode"}, status=400)
+            try:
+                telegram_id = int(str(tid_raw).strip())
+            except (ValueError, TypeError):
+                return web.json_response({"error": "invalid telegram_id"}, status=400)
+            if telegram_id <= 0 or telegram_id > 10**15:
+                return web.json_response({"error": "telegram_id out of range"}, status=400)
+            result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+            user = result.scalar_one_or_none()
+            if user is None:
+                return web.json_response({"error": "user not found"}, status=404)
+            targets = [user]
+            filter_json = {"telegram_id": telegram_id, "panel_email": panel_email}
+        else:
+            flt = data.get("filter") or {}
+            if not isinstance(flt, dict):
+                return web.json_response({"error": "filter must be object"}, status=400)
+            # also allow top-level q/from/to for convenience
+            for k in ("q", "from", "to", "has_approved"):
+                if k in data and k not in flt:
+                    flt[k] = data[k]
+            filter_json = dict(flt)
+            if panel_email:
+                filter_json["panel_email"] = panel_email
+            try:
+                targets = await _resolve_broadcast_targets(session, flt)
+            except ValueError as e:
+                return web.json_response({"error": str(e)}, status=400)
+            if not targets:
+                return web.json_response({"error": "No users match filter"}, status=400)
+            if include_configs and len(targets) > _MAX_BROADCAST_WITH_CONFIGS:
+                return web.json_response(
+                    {"error": f"Broadcast with configs limited to {_MAX_BROADCAST_WITH_CONFIGS} users (got {len(targets)}), narrow filter"},
+                    status=400,
+                )
+
+    # Acquire global lock before dedup + log creation to make them atomic (race-safe)
+    async with _broadcast_lock:
+        # Dedup + log creation (atomic under lock)
+        async with async_session() as session:
+            try:
+                recent = (await session.execute(select(MessageLog).order_by(MessageLog.created_at.desc()).limit(5))).scalars().all()
+                for r in recent:
+                    try:
+                        rf = r.filter_json or {}
+                        # Normalize JSON for sqlite vs postgres (dict vs string)
+                        rf_s = json.dumps(rf, sort_keys=True) if isinstance(rf, dict) else str(rf)
+                        cur_s = json.dumps(filter_json or {}, sort_keys=True) if isinstance(filter_json, dict) else str(filter_json)
+                        same_filter = rf_s == cur_s
+                    except Exception:
+                        same_filter = r.filter_json == filter_json
+                    if same_filter and r.text_html == text_html and r.status in ("pending", "sending"):
+                        return web.json_response({"error": "Duplicate send in progress, wait a moment"}, status=429)
+                    if same_filter and r.text_html == text_html:
+                        try:
+                            rc = r.created_at
+                            if rc is not None and rc.tzinfo is None:
+                                rc = rc.replace(tzinfo=UTC)
+                            age = (datetime.now(UTC) - rc).total_seconds() if rc else 999
+                        except Exception:
+                            age = 999
+                        if age < 10:
+                            return web.json_response({"error": "Duplicate message sent just now, wait 10s"}, status=429)
+            except Exception as e:
+                log.warning("Dedup check failed: %s", e)
+            admin_identity = _get_admin_identity(request)
+            log_entry = MessageLog(
+                admin_user=admin_identity,
+                kind=kind,
+                status="pending",
+                filter_json=filter_json,
+                text_html=text_html,
+                panel_email=panel_email,
+                total=len(targets),
+                sent=0,
+                failed=0,
+            )
+            session.add(log_entry)
+            await session.commit()
+            await session.refresh(log_entry)
+            log_id = log_entry.id
+            # Update to sending while still under outer lock (so second waiter sees 'sending')
+            log_entry.status = "sending"
+            await session.commit()
+
+        application = request.app.get("ptb_application")
+        if application is None or not hasattr(application, "bot"):
+            async with async_session() as session:
+                result = await session.execute(select(MessageLog).where(MessageLog.id == log_id))
+                entry = result.scalar_one_or_none()
+                if entry:
+                    entry.status = "failed"
+                    entry.error_summary = "Bot not available"
+                    await session.commit()
+            return web.json_response({"error": "Bot not available"}, status=500)
+
+        bot = application.bot
+        sent = 0
+        failed = 0
+        errors: list[str] = []
+        # Semaphore for panel hydration already global; TG send semaphore per batch
+        for idx, user in enumerate(targets):
+            telegram_id = user.telegram_id
+            try:
+                # Build messages for this user
+                messages: list[str] = []
+                if text_html:
+                    messages.append(text_html)
+                if include_configs:
+                    bucket = await _hydrate_configs_for_user(telegram_id, panel_email)
+                    if not bucket:
+                        if not text_html:
+                            messages.append("<i>اشتراک فعالی برای شما یافت نشد.</i>")
+                    else:
+                        now = datetime.now(UTC)
+                        for c, expiry, online, status in bucket:
+                            if status == "active":
+                                messages.append(_msg_format_product(c, expiry, online, now))
+                            elif status == "expired":
+                                messages.append(_msg_format_expired(c, expiry))
+                            else:
+                                messages.append(_msg_format_disabled(c, expiry))
+                    # Truncate to max
+                    if len(messages) > _MAX_CONFIG_MESSAGES + (1 if text_html else 0):
+                        messages = messages[: _MAX_CONFIG_MESSAGES + (1 if text_html else 0)]
+                # Send each message with rate limiting
+                for msg in messages:
+                    if len(msg) > 4000:
+                        msg = msg[:3990] + "…"
+                    async with _MSG_SEND_SEM:
+                        try:
+                            await bot.send_message(chat_id=telegram_id, text=msg, parse_mode="HTML")
+                        except Exception as e:
+                            # Handle Telegram RetryAfter
+                            err_s = str(e).lower()
+                            if "retry after" in err_s or "flood" in err_s or "too many requests" in err_s:
+                                # extract seconds
+                                m = re.search(r"retry after (\d+)", err_s)
+                                wait = int(m.group(1)) if m else 2
+                                wait = min(wait, 10)
+                                await asyncio.sleep(wait)
+                                # retry once
+                                try:
+                                    await bot.send_message(chat_id=telegram_id, text=msg, parse_mode="HTML")
+                                except Exception as e2:
+                                    raise e2
+                            else:
+                                raise
+                    # per-message throttle
+                    await asyncio.sleep(0.04)
+                sent += 1
+            except Exception as e:
+                failed += 1
+                err_msg = f"{telegram_id}: {type(e).__name__}: {str(e)[:120]}"
+                errors.append(err_msg)
+                log.warning("Messaging failed for %s: %s", telegram_id, e)
+            # Batch throttle every 20 users
+            if (idx + 1) % 20 == 0:
+                await asyncio.sleep(0.5)
+            if (idx + 1) % 100 == 0:
+                # incremental DB update to survive crashes
+                async with async_session() as session:
+                    result = await session.execute(select(MessageLog).where(MessageLog.id == log_id))
+                    entry = result.scalar_one_or_none()
+                    if entry:
+                        entry.sent = sent
+                        entry.failed = failed
+                        await session.commit()
+
+        # Final DB update
+        async with async_session() as session:
+            result = await session.execute(select(MessageLog).where(MessageLog.id == log_id))
+            entry = result.scalar_one_or_none()
+            if entry:
+                entry.sent = sent
+                entry.failed = failed
+                entry.status = "done" if failed == 0 else ("failed" if sent == 0 else "done")
+                if errors:
+                    entry.error_summary = "\n".join(errors[:20])
+                await session.commit()
+
+        return web.json_response(
+            {
+                "ok": True,
+                "log_id": log_id,
+                "total": len(targets),
+                "sent": sent,
+                "failed": failed,
+                "errors": errors[:10],
+            }
+        )
+
+
 # ── Admin static ────────────────────────────────────────────────────
 
 
@@ -1175,6 +1739,10 @@ def build_app(application) -> web.Application:
     app.router.add_get(ADMIN_PREFIX + "/api/discounts", handle_admin_discounts_get)
     app.router.add_post(ADMIN_PREFIX + "/api/discounts", handle_admin_discounts_create)
     app.router.add_delete(ADMIN_PREFIX + "/api/discounts/{id}", handle_admin_discounts_delete)
+    app.router.add_get(ADMIN_PREFIX + "/api/messages/emails", handle_admin_messages_emails)
+    app.router.add_post(ADMIN_PREFIX + "/api/messages/preview", handle_admin_messages_preview)
+    app.router.add_post(ADMIN_PREFIX + "/api/messages/send", handle_admin_messages_send)
+    app.router.add_get(ADMIN_PREFIX + "/api/messages/log", handle_admin_messages_log)
     # Static files for admin UI (public for login page styling)
     static_dir = _admin_static_dir()
     if static_dir.exists():

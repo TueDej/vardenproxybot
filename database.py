@@ -2,21 +2,28 @@ import logging
 
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from config import config
 from models import Base
 
 log = logging.getLogger(__name__)
 
-# Postgres-only engine — prod is on postgresql+psycopg. SQLite leftovers
-# (NullPool, file perms, check_same_thread) removed for simplicity.
-_kwargs: dict = {
-    "echo": False,
-    "pool_size": 20,
-    "max_overflow": 30,
-    "pool_pre_ping": True,
-    "pool_recycle": 3600,
-}
+# Postgres prod uses pooled engine; keep SQLite fallback for tests/local dev.
+if config.database_url.startswith("sqlite"):
+    _kwargs: dict = {
+        "echo": False,
+        "poolclass": NullPool,
+        "connect_args": {"check_same_thread": False},
+    }
+else:
+    _kwargs = {
+        "echo": False,
+        "pool_size": 20,
+        "max_overflow": 30,
+        "pool_pre_ping": True,
+        "pool_recycle": 3600,
+    }
 
 engine = create_async_engine(config.database_url, **_kwargs)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
@@ -98,21 +105,22 @@ def _migrate_sync(sync_conn) -> None:
                 "Added orders.discount_code_id",
             )
 
-    # Telegram user IDs exceed INTEGER range (~2.1e9) — ensure BIGINT.
-    def _alter_bigint(sql, msg):
-        try:
-            sync_conn.exec_driver_sql(sql)
-            log.info(msg)
-        except Exception:
-            log.warning("Migration step failed: %s", msg, exc_info=True)
+    # Telegram user IDs exceed INTEGER range (~2.1e9) — ensure BIGINT on Postgres.
+    if not str(sync_conn.engine.url).startswith("sqlite"):
+        def _alter_bigint(sql, msg):
+            try:
+                sync_conn.exec_driver_sql(sql)
+                log.info(msg)
+            except Exception:
+                log.warning("Migration step failed: %s", msg, exc_info=True)
 
-    if inspector.has_table("users"):
-        _alter_bigint(
-            "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT USING telegram_id::bigint",
-            "Migrated users.telegram_id -> BIGINT",
-        )
-    if inspector.has_table("discount_codes"):
-        _alter_bigint(
-            "ALTER TABLE discount_codes ALTER COLUMN used_by_telegram_id TYPE BIGINT USING used_by_telegram_id::bigint",
-            "Migrated discount_codes.used_by_telegram_id -> BIGINT",
-        )
+        if inspector.has_table("users"):
+            _alter_bigint(
+                "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT USING telegram_id::bigint",
+                "Migrated users.telegram_id -> BIGINT",
+            )
+        if inspector.has_table("discount_codes"):
+            _alter_bigint(
+                "ALTER TABLE discount_codes ALTER COLUMN used_by_telegram_id TYPE BIGINT USING used_by_telegram_id::bigint",
+                "Migrated discount_codes.used_by_telegram_id -> BIGINT",
+            )

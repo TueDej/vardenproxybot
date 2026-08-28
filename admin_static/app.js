@@ -524,6 +524,205 @@ $("#disc-generate")?.addEventListener("click", async () => {
   }
 });
 
+// ── messages ──
+let messagesLogPage = 1;
+
+function updateMsgModeUI() {
+  const mode = $("#msg-mode")?.value || "single";
+  const isSingle = mode === "single";
+  $("#msg-single-wrap")?.classList.toggle("hidden", !isSingle);
+  $("#msg-broadcast-q-wrap")?.classList.toggle("hidden", isSingle);
+  $("#msg-broadcast-filter-wrap")?.classList.toggle("hidden", isSingle);
+  if (isSingle) $("#msg-target-info").textContent = "";
+  else $("#msg-target-info").textContent = "Broadcast: set search/filters then Lookup to count matching users.";
+}
+
+$("#msg-mode")?.addEventListener("change", updateMsgModeUI);
+updateMsgModeUI();
+
+async function resolveMsgTarget() {
+  const mode = $("#msg-mode").value;
+  const info = $("#msg-target-info");
+  const sel = $("#msg-panel-email");
+  info.textContent = "";
+  info.style.color = "#8aa098";
+  // reset email options
+  if (sel) {
+    sel.innerHTML = '<option value="">— no filter —</option><option value="all">All emails for user</option>';
+  }
+  if (mode === "single") {
+    const tid = $("#msg-target").value.trim();
+    if (!tid) { info.textContent = "Enter Telegram ID"; info.style.color = "#e07a7a"; return; }
+    try {
+      const data = await fetchJSON(`/admin/api/messages/emails?telegram_id=${encodeURIComponent(tid)}`);
+      if (!data.items.length) {
+        info.textContent = data.panel_configured === false ? "Panel not configured — no configs" : "User found — no active configs (will send text only)";
+        info.style.color = "#e0b15a";
+      } else {
+        info.textContent = `Found ${data.items.length} config(s): ${data.items.map(c=> c.email + " ("+c.data_label+" "+c.status+")").join(", ")}`;
+        info.style.color = "#5fb68a";
+        data.items.forEach((c)=>{
+          const opt = document.createElement("option");
+          opt.value = c.email;
+          opt.textContent = `${c.email} — ${c.data_label} ${c.status}`;
+          sel.appendChild(opt);
+        });
+      }
+    } catch (e) {
+      info.textContent = "Lookup failed: " + e.message;
+      info.style.color = "#e07a7a";
+    }
+  } else {
+    const q = $("#msg-q").value.trim();
+    const hasApproved = $("#msg-has-approved").checked;
+    // preview count via users API (lightweight)
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (hasApproved) params.set("has_approved", "1");
+      // abuse users endpoint? Instead we can try messages log? Use users count via /admin/api/users?limit=1 to get total
+      params.set("page","1"); params.set("limit","1");
+      // need has_approved param not in users, but our broadcast resolver supports it — we estimate via messages preview? fallback to users total
+      // For has_approved we manually note
+      const data = await fetchJSON(`/admin/api/users?` + params.toString());
+      // If hasApproved, note that count is overestimate
+      let note = `${data.total} user(s) match search`;
+      if (hasApproved) note += " (will filter to those with approved orders on send)";
+      note += ` — broadcast with configs limited to 200`;
+      info.textContent = note;
+      info.style.color = "#5fb68a";
+    } catch (e) {
+      info.textContent = "Count failed: " + e.message;
+      info.style.color = "#e07a7a";
+    }
+  }
+}
+
+$("#msg-resolve")?.addEventListener("click", resolveMsgTarget);
+
+async function previewMsg() {
+  const mode = $("#msg-mode").value;
+  const text = $("#msg-text").value;
+  const include = $("#msg-include-configs").checked;
+  const panelEmail = $("#msg-panel-email").value;
+  const box = $("#msg-preview-box");
+  const result = $("#msg-result");
+  result.textContent = "";
+  box.classList.add("hidden");
+  let payload = { text_html: text, include_configs: include, panel_email: panelEmail || null };
+  if (mode === "single") {
+    const tid = $("#msg-target").value.trim();
+    if (!tid) { result.textContent = "Telegram ID required for preview"; result.style.color="#e07a7a"; return; }
+    payload.telegram_id = tid;
+  } else {
+    result.textContent = "Preview uses single-user sample; for broadcast showing first matched user";
+    result.style.color="#8aa098";
+    // for broadcast preview, pick first user from search
+    const q = $("#msg-q").value.trim();
+    try {
+      const params = new URLSearchParams(); if(q) params.set("q", q); params.set("limit","1"); params.set("page","1");
+      const u = await fetchJSON(`/admin/api/users?`+params.toString());
+      if (!u.items.length) { result.textContent="No user for preview"; result.style.color="#e07a7a"; return; }
+      payload.telegram_id = u.items[0].telegram_id;
+    } catch(e){ result.textContent="Preview user lookup failed: "+e.message; result.style.color="#e07a7a"; return; }
+  }
+  const btn = $("#msg-preview"); btn.disabled=true; btn.textContent="Previewing…";
+  try {
+    const res = await fetch("/admin/api/messages/preview", {
+      method: "POST",
+      headers: {"Content-Type":"application/json","X-Requested-With":"XMLHttpRequest"},
+      credentials:"include",
+      body: JSON.stringify(payload)
+    });
+    if (res.status===401){ window.location.href="/admin/login"; return; }
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    box.innerHTML = data.rendered_html || "<i>(empty)</i>";
+    box.classList.remove("hidden");
+    result.textContent = "Preview rendered ✓";
+    result.style.color="#5fb68a";
+  } catch(e){
+    result.textContent = "Preview failed: "+e.message;
+    result.style.color="#e07a7a";
+  } finally { btn.disabled=false; btn.textContent="Preview"; }
+}
+
+$("#msg-preview")?.addEventListener("click", previewMsg);
+
+async function sendMsg() {
+  const mode = $("#msg-mode").value;
+  const text = $("#msg-text").value;
+  const include = $("#msg-include-configs").checked;
+  const panelEmail = $("#msg-panel-email").value;
+  const result = $("#msg-result");
+  result.textContent = "";
+  if (!text.trim() && !include) { result.textContent="Provide text or enable configs"; result.style.color="#e07a7a"; return; }
+  if (!confirm(mode==="single" ? "Send this message?" : "Send broadcast? This will message many users.")) return;
+  const btn = $("#msg-send"); btn.disabled=true; btn.textContent="Sending…";
+  let payload = { mode, text_html: text, include_configs: include, panel_email: panelEmail || null };
+  if (mode==="single") {
+    const tid = $("#msg-target").value.trim();
+    if (!tid){ result.textContent="Telegram ID required"; result.style.color="#e07a7a"; btn.disabled=false; btn.textContent="Send"; return; }
+    payload.telegram_id = tid;
+  } else {
+    payload.filter = { q: $("#msg-q").value.trim() || undefined, has_approved: $("#msg-has-approved").checked || undefined };
+    // clean undefined
+    Object.keys(payload.filter).forEach(k=> payload.filter[k]===undefined && delete payload.filter[k]);
+  }
+  try {
+    const res = await fetch("/admin/api/messages/send", {
+      method:"POST",
+      headers:{"Content-Type":"application/json","X-Requested-With":"XMLHttpRequest"},
+      credentials:"include",
+      body: JSON.stringify(payload)
+    });
+    if (res.status===401){ window.location.href="/admin/login"; return; }
+    const txt = await res.text();
+    let data; try{ data=JSON.parse(txt);} catch{ throw new Error(txt);}
+    if (!res.ok) throw new Error(data.error || txt);
+    result.textContent = `Sent ${data.sent}/${data.total} (failed ${data.failed}) ✓ log #${data.log_id}`;
+    result.style.color="#5fb68a";
+    loadMessagesLog();
+    loadStats();
+  } catch(e){
+    result.textContent = "Send failed: "+e.message;
+    result.style.color="#e07a7a";
+  } finally { btn.disabled=false; btn.textContent="Send"; }
+}
+
+$("#msg-send")?.addEventListener("click", sendMsg);
+
+async function loadMessagesLog(page=1) {
+  messagesLogPage = page;
+  const tbody = $("#messages-log-body");
+  const pag = $("#messages-log-pag");
+  try {
+    const data = await fetchJSON(`/admin/api/messages/log?page=${page}&limit=20`);
+    if (!data.items.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="muted">No messages yet</td></tr>';
+      if (pag) pag.innerHTML="";
+      return;
+    }
+    tbody.innerHTML = data.items.map(l=>`
+      <tr>
+        <td>${fmtDate(l.created_at)}</td>
+        <td><span class="pill ${l.kind}">${escapeHtml(l.kind)}</span></td>
+        <td><span class="pill ${l.status}">${escapeHtml(l.status)}</span></td>
+        <td>${l.filter_json ? escapeHtml(JSON.stringify(l.filter_json).slice(0,60)) : l.panel_email ? escapeHtml(l.panel_email) : "—"} <span class="muted">total ${l.total}</span></td>
+        <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(l.text_html||"—")}</td>
+        <td class="muted">${l.sent}/${l.total} ${l.failed?`❌${l.failed}`:""}</td>
+      </tr>
+    `).join("");
+    if (pag) {
+      const pages = Math.max(1, Math.ceil(data.total / data.limit));
+      pag.innerHTML = `<button ${data.page<=1?"disabled":""} onclick="loadMessagesLog(${data.page-1})">Prev</button><span class="muted">Page ${data.page}/${pages} — ${data.total} total</span><button ${data.page>=pages?"disabled":""} onclick="loadMessagesLog(${data.page+1})">Next</button>`;
+    }
+  } catch(e){
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">Failed to load: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+window.loadMessagesLog = loadMessagesLog;
+
 // ── nav ──
 function switchTab(tab) {
   currentTab = tab;
@@ -534,12 +733,14 @@ function switchTab(tab) {
   $("#users-panel").classList.toggle("hidden", tab !== "users");
   $("#packages-panel").classList.toggle("hidden", tab !== "packages");
   $("#discounts-panel").classList.toggle("hidden", tab !== "discounts");
+  $("#messages-panel").classList.toggle("hidden", tab !== "messages");
   $("#page-title").textContent = tab.charAt(0).toUpperCase() + tab.slice(1);
-  document.querySelector("#toolbar-orders").style.display = tab === "packages" || tab === "discounts" ? "none" : "flex";
+  document.querySelector("#toolbar-orders").style.display = tab === "packages" || tab === "discounts" || tab === "messages" ? "none" : "flex";
   if (tab === "orders") loadOrders();
   else if (tab === "users") loadUsers();
   else if (tab === "packages") loadPackages();
   else if (tab === "discounts") loadDiscounts();
+  else if (tab === "messages") loadMessagesLog();
 }
 
 document.querySelectorAll(".nav-item, .tab").forEach((btn) => {

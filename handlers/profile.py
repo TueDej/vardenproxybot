@@ -17,6 +17,17 @@ from config import config
 from database import async_session
 from handlers.rate_limit import check_cooldown
 from keyboards import home_keyboard, main_menu_keyboard
+from message_render import (
+    data_label as _data_label,
+)
+from message_render import (
+    expiry_dt as _expiry_dt,
+)
+from message_render import (
+    format_disabled_message,
+    format_expired_message,
+    format_product_message as _format_product_message,
+)
 from models import User
 from vpn_service import VPNPanelError, VPNPanelService
 
@@ -26,44 +37,6 @@ log = logging.getLogger(__name__)
 def _renew_keyboard(email: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("🔄 تمدید اشتراک", callback_data=f"renew|{email}")]]
-    )
-
-
-def _expiry_dt(ms: int) -> datetime | None:
-    """Panel expiry in ms since epoch; 0 means 'never expires'."""
-    if not ms:
-        return None
-    return datetime.fromtimestamp(ms / 1000, tz=UTC)
-
-
-def _data_label(total_gb: int) -> str:
-    return "Unlimited" if total_gb == 0 else f"{total_gb // (1024 ** 3)}GB"
-
-
-def _format_links_block(links: list[str]) -> str:
-    if not links:
-        return ""
-    lines = ["🔗 <b>کانفیگ‌ها:</b>"]
-    for link in links:
-        lines.append(f"<pre><code>{escape(link)}</code></pre>")
-    return "\n".join(lines)
-
-
-def _format_product_message(
-    c: dict, expiry_dt: datetime | None, online_emails: set, now: datetime
-) -> str:
-    if expiry_dt is None:
-        expiry_line = "⏳ انقضا: ندارد"
-    else:
-        remaining = (expiry_dt - now).days
-        expiry_line = f"⏳ انقضا: {expiry_dt.strftime('%Y-%m-%d')} ({remaining} روز باقی‌مانده)"
-    online_tag = " 🟢 <i>آنلاین</i>" if c["email"] in online_emails else ""
-    links_block = _format_links_block(c["links"])
-    suffix = f"\n{links_block}" if links_block else ""
-    return (
-        f"📦 {_data_label(c['total_gb'])} | {c['limit_ip']} دستگاه{online_tag}\n"
-        f"{expiry_line}"
-        f"{suffix}"
     )
 
 
@@ -147,10 +120,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sent >= max_details:
             truncated = True
             break
-        when = expiry_dt.strftime("%Y-%m-%d") if expiry_dt else "نامشخص"
         await update.message.reply_text(
-            f"⌛ <b>منقضی‌شده</b> — {_data_label(c['total_gb'])}، پایان: {when}\n"
-            "برای تمدید روی دکمه زیر بزنید یا گزینه 🛒 خرید اشتراک را انتخاب کنید.",
+            format_expired_message(c, expiry_dt),
             reply_markup=_renew_keyboard(c["email"]),
             parse_mode="HTML",
         )
@@ -161,9 +132,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             truncated = True
             break
         await update.message.reply_text(
-            f"🚫 <b>غیرفعال</b> — {_data_label(c['total_gb'])} | {c['limit_ip']} دستگاه\n"
-            f"⏳ انقضا: {expiry_dt.strftime('%Y-%m-%d') if expiry_dt else 'ندارد'}\n"
-            "با پشتیبانی تماس بگیرید.",
+            format_disabled_message(c, expiry_dt),
             parse_mode="HTML",
         )
         sent += 1

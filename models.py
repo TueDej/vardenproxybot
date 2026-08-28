@@ -6,7 +6,7 @@ except ImportError:  # Python <3.11
     UTC = timezone.utc  # type: ignore[no-redef]  # noqa: UP017
 from datetime import datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import JSON, BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -101,3 +101,29 @@ class Order(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="orders", lazy="raise")
+
+
+class MessageLog(Base):
+    __tablename__ = "message_logs"
+    __table_args__ = (
+        Index("ix_message_logs_created_at", "created_at"),
+        Index("ix_message_logs_kind", "kind"),
+        Index("ix_message_logs_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    admin_user: Mapped[str] = mapped_column(String(64), nullable=False, default="admin")
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # custom / config_forward / broadcast
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", server_default="pending"
+    )  # pending, sending, done, failed
+    filter_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    text_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    panel_email: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
