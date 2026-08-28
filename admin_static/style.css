@@ -35,6 +35,8 @@
   --h: 38px;
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 
+  --icon-weight: 0.85px; /* outline weight bolding the hand-drawn icons */
+
   --font: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
   --mono: ui-monospace, Menlo, Consolas, monospace;
 }
@@ -74,6 +76,16 @@ code {
   width: auto;
   vertical-align: -0.18em;
   flex-shrink: 0;
+}
+
+/* Thicken the hand-drawn strokes: outline every path in its own color.
+   vector-effect="non-scaling-stroke" (on the paths) keeps this uniform
+   across icons whose viewBox scales differ. */
+.ico path {
+  stroke: currentColor;
+  stroke-width: var(--icon-weight);
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* ── Utilities ─────────────────────────────── */
