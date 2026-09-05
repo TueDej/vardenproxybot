@@ -159,9 +159,12 @@ code {
   justify-content: center;
 }
 
-.brand-title { font-weight: 700; font-size: 15px; letter-spacing: 0.02em; }
+/* two-line text block: tight line boxes so its height matches the 32px
+   logo and the flex row keeps it vertically centered */
+.brand-text { display: flex; flex-direction: column; justify-content: center; }
+.brand-title { font-weight: 700; font-size: 15px; letter-spacing: 0.02em; line-height: 1.15; }
 .brand-title span { color: var(--accent); font-weight: 400; }
-.brand-sub { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.brand-sub { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.15; margin-top: 2px; }
 
 
 .sidebar-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }

@@ -169,7 +169,7 @@ def _admin_login_page(error: str | None = None) -> web.Response:
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Varden Admin — Login</title>
-<link rel="stylesheet" href="/admin/static/style.css?v=8">
+<link rel="stylesheet" href="/admin/static/style.css?v=9">
 </head>
 <body><div class="login-wrap"><form class="login-card" method="POST" action="/admin/login">
 <div class="login-brand">
