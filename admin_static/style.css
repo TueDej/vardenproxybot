@@ -124,7 +124,9 @@ code {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 0 12px;
+  /* no top padding: .sidebar-brand must sit flush at the top edge so its
+     content centers between the sidebar top and its own border-bottom */
+  padding: 0 0 12px;
   background: var(--bg-raised);
   border-right: 1px solid var(--border);
   overflow-y: auto;
