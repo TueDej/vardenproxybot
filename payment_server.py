@@ -59,6 +59,9 @@ from message_render import (
 from message_render import (
     format_product_message as _msg_format_product,
 )
+from message_render import (
+    subscription_card as _msg_subscription_card,
+)
 from models import DiscountCode, MessageLog, Order, User
 from rtl import rtl as _rtl
 from vpn_service import PanelRenewalLimitError, VPNPanelError, VPNPanelService
@@ -1334,34 +1337,33 @@ async def handle_admin_generate_subscription(request: web.Request) -> web.Respon
         notify_error = None
         if application is not None and hasattr(application, "bot") and application.bot is not None:
             try:
-                # Build config message similar to profile format
-                from message_render import data_label as _dl
-
-                # Use same format as profile for consistency
-                # Fetch hydrated to get expiry/limit etc. for nice rendering? Use panel data directly.
-                # Simple: send links block + expiry
-                if links:
+                # Same card the profile shows — one shared renderer for every path.
+                try:
+                    card = await _msg_subscription_card(email or "", data_gb, duration_days, links)
+                except Exception:
+                    log.warning("Gift card render failed for %s", email, exc_info=True)
+                    card = ""
+                if card:
+                    text = (
+                        f"🎁 <b>اشتراک هدیه برای شما فعال شد!</b>\n\n"
+                        f"{card}"
+                        "\n\n🎁 <i>این اشتراک هدیه است — قابل تمدید نیست.</i>"
+                    )
+                elif links:
                     config_block = "\n".join(f"🔗 <code>{escape(l)}</code>" for l in links)
                     text = (
-                        f"🎁 <b>هدیه اشتراک برای شما فعال شد!</b>\n\n"
-                        f"📦 {escape(label)} | {duration_days} روز\n"
-                        f"📧 <code>{escape(email or '')}</code>\n\n"
-                        f"{config_block}\n\n"
-                        f"از بخش 👤 پروفایل هم می‌توانید کانفیگ‌ها را ببینید."
+                        f"🎁 <b>اشتراک هدیه برای شما فعال شد!</b>\n\n"
+                        f"{config_block}"
+                        "\n\n🎁 <i>این اشتراک هدیه است — قابل تمدید نیست.</i>"
                     )
                 else:
-                    # Fallback: hydrate like profile
-                    bucket = await _hydrate_configs_for_user(telegram_id, email)
-                    if bucket:
-                        now = datetime.now(UTC)
-                        parts = []
-                        for c, expiry, online, st in bucket:
-                            if st == "active":
-                                parts.append(_msg_format_product(c, expiry, online, now))
-                        text = "🎁 <b>هدیه اشتراک</b>\n\n" + "\n\n".join(parts[:2]) if parts else "🎁 اشتراک هدیه فعال شد."
-                    else:
-                        text = f"🎁 <b>اشتراک هدیه</b> {escape(label)} فعال شد."
-                await application.bot.send_message(chat_id=telegram_id, text=_rtl(text), parse_mode="HTML")
+                    text = f"🎁 <b>اشتراک هدیه</b> {escape(label)} فعال شد."
+                await application.bot.send_message(
+                    chat_id=telegram_id,
+                    text=_rtl(text),
+                    parse_mode="HTML",
+                    reply_markup=main_menu_keyboard(),
+                )
                 notify_ok = True
             except Exception as e:
                 notify_error = str(e)
@@ -1688,7 +1690,7 @@ async def _paid_cancelled_flow(application, _session, order, authority, outcome)
         )
         await _notify_admins(
             application,
-            f"⚠️ <b>پرداخت سفارش لغوشده!</b> سفارش #{escape(str(oid))} (کد پیگیری "
+            f"⚠️ <b>پرداخت سفارش لغو شده!</b> سفارش #{escape(str(oid))} (کد پیگیری "
             f"<code>{escape(str(outcome['ref_id']))}</code>) توسط کاربر لغو شده اما پرداخت آن انجام شد و استرداد خودکار ممکن نشد: {escape(str(exc))}. "
             "لطفاً دستی رسیدگی کنید.",
         )
@@ -1707,7 +1709,7 @@ async def _paid_cancelled_flow(application, _session, order, authority, outcome)
     )
     await _notify_admins(
         application,
-        f"ℹ️ سفارش لغوشده #{escape(str(oid))} پرداخت شد — مبلغ به‌صورت خودکار مستردد شد "
+        f"ℹ️ سفارش لغو شده #{escape(str(oid))} پرداخت شد — مبلغ به‌صورت خودکار مسترد شد "
         f"(کد پیگیری <code>{escape(str(outcome['ref_id']))}</code>).",
     )
     await _notify(
@@ -1716,7 +1718,7 @@ async def _paid_cancelled_flow(application, _session, order, authority, outcome)
         f"💳 سفارش #{escape(str(oid))} قبلاً لغو شده بود؛ به همین دلیل مبلغ پرداختی به‌صورت خودکار به کارت شما بازگشت داده شد.",
     )
     return _page(
-        "مبلغ مستردد شد ✅",
+        "مبلغ مسترد شد ✅",
         "سفارش لغو شده بود؛ مبلغ پرداختی به‌صورت خودکار به کارت شما بازگشت داده شد.",
     )
 
@@ -1847,12 +1849,12 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
             await _notify(
                 application,
                 chat_id,
-                "✅ پرداخت شما دریافت شد، اما آماده‌سازی کانفیگ اندکی طول کشیده است. "
+                "✅ پرداخت شما دریافت شد، اما آماده‌سازی کانفیگ کمی زمان می‌برد. "
                 "به‌زودی از بخش 👤 پروفایل و اشتراک‌های من بررسی کنید یا با پشتیبانی تماس بگیرید.",
             )
             await _notify_admins(
                 application,
-                f"🚨 <b>پرداخت بدون تأمین!</b> سفارش #{escape(str(oid))} پرداخت و تأیید شد، اما "
+                f"🚨 <b>پرداخت بدون فعال‌سازی!</b> سفارش #{escape(str(oid))} پرداخت و تأیید شد، اما "
                 f"آماده‌سازی روی پنل شکست خورد و سفارش در حالت pending ماند:\n"
                 f"<code>{escape(str(exc))}</code>\n"
                 "لطفاً دستی رسیدگی کنید (تأیید مجدد سفارش یا استرداد وجه).",
@@ -1898,13 +1900,22 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
             return await _paid_cancelled_flow(application, session, order, authority, outcome)
 
     ref = outcome["ref_id"]
+    # Same card the profile shows — one shared renderer for every path.
+    try:
+        _card_email = order.panel_email or order.renew_email or ""
+        _card = await _msg_subscription_card(
+            _card_email, order.data_gb, order.duration_days, None
+        )
+    except Exception:
+        log.warning("Success card render failed for order #%s", oid, exc_info=True)
+        _card = ""
+    _card_suffix = f"\n\n{_card}" if _card else ""
     if order.renew_email:
         await _notify(
             application,
             chat_id,
-            f"🎉 <b>تمدید اشتراک شما با موفقیت انجام شد!</b> (سفارش #{escape(str(oid))})\n\n"
-            "زمان اشتراک فعلی شما تمدید شد؛ همان کانفیگ قبلی همچنان معتبر است.\n"
-            "وضعیت را از بخش 👤 پروفایل و اشتراک‌های من بررسی کنید.",
+            f"🎉 <b>تمدید اشتراک شما با موفقیت انجام شد!</b> (سفارش #{escape(str(oid))})"
+            f"{_card_suffix}",
         )
         body = (
             f"تمدید با موفقیت انجام شد (کد پیگیری: {escape(str(ref))}). "
@@ -1914,8 +1925,8 @@ async def handle_zarinpal_callback(request: web.Request) -> web.Response:
         await _notify(
             application,
             chat_id,
-            f"🎉 <b>پرداخت شما با موفقیت تأیید شد!</b> (سفارش #{escape(str(oid))})\n\n"
-            "کانفیگ شما آماده است؛ آن را از بخش 👤 پروفایل و اشتراک‌های من دریافت کنید.",
+            f"🎉 <b>پرداخت شما با موفقیت تأیید شد!</b> (سفارش #{escape(str(oid))})"
+            f"{_card_suffix}",
         )
         body = f"پرداخت با موفقیت تأیید شد (کد پیگیری: {escape(str(ref))}). به ربات برگردید و کانفیگ خود را دریافت کنید."
     return _page("پرداخت موفق ✅", body)
@@ -1998,9 +2009,9 @@ async def _reconcile_stranded_orders(application) -> None:
     try:
         await _notify_admins(
             application,
-            f"🚨 <b>سفارش‌های نیمه‌کاره پس از ری‌استارت:</b>\n{escape(detail)}\n"
+            f"🚨 <b>سفارش‌های نیمه‌کاره پس از راه‌اندازی مجدد:</b>\n{escape(detail)}\n"
             "این سفارش‌ها تأیید شده‌اند اما هیچ کانفیگی برایشان ساخته نشده است "
-            "(احتمالاً کرش بین ثبت تأیید و ساخت کانفیگ روی پنل). لطفاً دستی بررسی کنید.",
+            "(احتمالاً توقف ناگهانی بین ثبت تأیید و ساخت کانفیگ روی پنل). لطفاً دستی بررسی کنید.",
         )
     except Exception:
         log.warning("Could not notify admins about stranded orders", exc_info=True)

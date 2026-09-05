@@ -64,7 +64,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👤 <b>پروفایل</b>\n\n"
             f"🆔 شناسه کاربری: <code>{user.telegram_id}</code>\n"
             f"📛 نام: {_rtl_user(escape(user.first_name or ''))}\n"
-            f"📅 عضو از: {user.created_at.strftime('%Y-%m-%d')}\n\n"
+            f"📅 تاریخ عضویت: {user.created_at.strftime('%Y-%m-%d')}\n\n"
         )
 
     if not config.panel_configured:

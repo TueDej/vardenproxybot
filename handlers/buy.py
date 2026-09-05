@@ -216,7 +216,7 @@ def purchase_blocked_reason(telegram_id: int) -> str | None:
     if not config.zarinpal_configured:
         return rtl("💳 پرداخت‌ها موقتاً در دسترس نیستند.\nلطفاً بعداً تلاش کنید یا با پشتیبانی تماس بگیرید.")
     if config.zarinpal_sandbox and telegram_id not in config.admin_ids:
-        return rtl("🔒 <b>حالت آزمایشی</b> — فعلاً فقط مدیر فروشگاه امکان خرید دارد.")
+        return rtl("🔒 <b>حالت آزمایشی</b> — فعلاً فقط مدیران امکان خرید دارند.")
     return None
 
 
@@ -350,7 +350,7 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not order_id or not order:
         await update.message.reply_text(
-            rtl("❌ سفارش در انتظاری برای لغو وجود ندارد."),
+            rtl("❌ سفارش فعالی برای لغو وجود ندارد."),
             reply_markup=main_menu_keyboard(),
         )
         return
@@ -368,7 +368,7 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if claim.rowcount == 0:
             await update.message.reply_text(
-                rtl("❌ سفارش در انتظاری برای لغو وجود ندارد."),
+                rtl("❌ سفارش فعالی برای لغو وجود ندارد."),
                 reply_markup=main_menu_keyboard(),
             )
             return

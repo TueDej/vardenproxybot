@@ -75,9 +75,9 @@ async def send_discount_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
         "🎟️ <b>کد تخفیف</b>\n"
         "هر کد فقط یک‌بار قابل استفاده است.\n\n"
         + (
-            "قصد تمدید اشتراک خود را دارید؛ کد تخفیف دارید؟"
+            "برای تمدید اشتراک، آیا کد تخفیف دارید؟"
             if is_renew
-            else "قصد خرید اشتراک جدید را دارید؛ کد تخفیف دارید؟"
+            else "برای خرید اشتراک جدید، آیا کد تخفیف دارید؟"
         )
     )
     await update.effective_message.reply_text(

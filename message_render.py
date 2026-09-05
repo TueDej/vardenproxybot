@@ -2,6 +2,10 @@
 
 Matches the exact format shown in the user's profile (`handlers/profile.py`)
 so that admin-forwarded configs are indistinguishable from the profile view.
+
+`subscription_card()` is the single entry point every fulfillment path
+(purchase, renewal, gift, admin approve, payment callback) must use, so a
+delivered config always looks exactly like the profile card.
 """
 
 try:
@@ -10,10 +14,13 @@ except ImportError:  # Python <3.11
     from datetime import timezone
 
     UTC = timezone.utc  # type: ignore[no-redef]  # noqa: UP017
+import contextlib
 from datetime import datetime
 from html import escape
 
+from config import config as _config
 from rtl import rtl as _rtl
+from vpn_service import VPNPanelService, build_expiry_ms
 
 
 def expiry_dt(ms: int) -> datetime | None:
@@ -67,3 +74,62 @@ def format_disabled_message(c: dict, expiry: datetime | None) -> str:
         f"⏳ انقضا: {expiry.strftime('%Y-%m-%d') if expiry else 'ندارد'}\n"
         "با پشتیبانی تماس بگیرید."
     )
+
+
+def _unwrap_client(obj: dict | None) -> dict:
+    """Accept both direct and {"client": {...}}-wrapped panel payloads."""
+    if not isinstance(obj, dict):
+        return {}
+    inner = obj.get("client")
+    if isinstance(inner, dict):
+        return inner
+    return obj
+
+
+async def subscription_card(
+    email: str,
+    data_gb: int = 0,
+    duration_days: int = 30,
+    links: list[str] | None = None,
+) -> str:
+    """Render one subscription exactly like the profile's active card.
+
+    Live panel data is preferred (quota, device limit, expiry, links,
+    online flag); order-derived values are the fallback so the message
+    still renders when the panel is unreachable.
+    """
+    total_bytes = max(0, int(data_gb or 0)) * 1024**3
+    expiry_ms = build_expiry_ms(int(duration_days or 30))
+    limit_ip = 0
+    live_links: list[str] | None = None
+    online = False
+    if email:
+        info: dict = {}
+        with contextlib.suppress(Exception):
+            info = _unwrap_client(await VPNPanelService.get_client(email))
+        if info:
+            with contextlib.suppress(TypeError, ValueError):
+                total_bytes = int(info.get("totalGB", total_bytes) or 0)
+            with contextlib.suppress(TypeError, ValueError):
+                limit_ip = int(info.get("limitIp", 0) or 0)
+            with contextlib.suppress(TypeError, ValueError):
+                expiry_ms = int(info.get("expiryTime", expiry_ms) or expiry_ms)
+        with contextlib.suppress(Exception):
+            live_links = await VPNPanelService.get_client_links(email)
+        with contextlib.suppress(Exception):
+            online = email in await VPNPanelService.get_online_emails()
+    if not live_links:
+        live_links = list(links or [])
+    if not limit_ip:
+        try:
+            limit_ip = int(_config.vpn_limit_ip)
+        except Exception:
+            limit_ip = 0
+    now = datetime.now(UTC)
+    c = {
+        "email": email or "",
+        "total_gb": total_bytes,
+        "limit_ip": limit_ip,
+        "links": live_links,
+    }
+    return format_product_message(c, expiry_dt(expiry_ms), {email} if online and email else set(), now)

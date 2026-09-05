@@ -48,7 +48,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _abort_pending_if_any(update, context)
     user = update.effective_user
     welcome_text = rtl(
-        f"👋 سلام {_rtl_user(escape(user.first_name))} عزیز!\n\n"
+        f"👋 سلام {_rtl_user(escape(user.first_name))}!\n\n"
         "<b>واردن‌پروکسی</b> — اینترنتی آزاد و امن.\n\n"
         "🛒 <b>خرید اشتراک</b> — انتخاب پلن و تحویل فوری کانفیگ\n"
         "👤 <b>پروفایل و اشتراک‌های من</b> — اشتراک‌ها و کانفیگ‌های فعال\n"
@@ -64,7 +64,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = rtl(
         "ℹ️ <b>راهنما و پشتیبانی</b>\n\n"
         "🛒 برای خرید، <b>خرید اشتراک</b> را انتخاب کنید.\n"
-        "💳 پس از پرداخت در زرین‌پال، اشتراک بلافاصله فعال و کانفیگ تحویل داده می‌شود.\n"
+        "💳 پس از پرداخت در زرین‌پال، اشتراک شما بلافاصله فعال و کانفیگ برای شما ارسال می‌شود.\n"
         "👤 اشتراک‌ها و کانفیگ‌های فعال شما در <b>پروفایل و اشتراک‌های من</b> است.\n\n"
         "📩 پشتیبانی: https://t.me/vardenERR"
     )

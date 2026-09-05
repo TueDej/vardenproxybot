@@ -1,3 +1,4 @@
+import contextlib
 import logging
 from html import escape
 
@@ -12,9 +13,10 @@ from handlers.buy import (
     OrderNotApprovable,
     RenewalLimitExceeded,
     approve_order,
-    format_vpn_config,
     renew_order,
 )
+from keyboards import main_menu_keyboard
+from message_render import subscription_card
 from models import Order
 from rtl import rtl
 from vpn_service import VPNPanelError
@@ -50,22 +52,48 @@ async def free_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
             return
         try:
             if order.renew_email:
-                await renew_order(session, order)
+                panel_renew = await renew_order(session, order)
+                card_email = panel_renew.get("email") or order.renew_email or ""
+            else:
+                panel_new = await approve_order(session, order)
+                card_email = panel_new.get("email") or order.panel_email or ""
+                panel_renew = panel_new
+            # Same card the profile shows — one shared renderer for every path.
+            card = await subscription_card(
+                card_email, order.data_gb, order.duration_days, panel_renew.get("links")
+            )
+            gift_note = (
+                rtl("\n\n🎁 <i>این اشتراک هدیه است — قابل تمدید نیست.</i>")
+                if bool(getattr(order, "is_gift", False))
+                else ""
+            )
+            if order.renew_email:
                 await query.message.reply_text(
-                    rtl(f"✅ <b>تمدید رایگان (ادمین)</b> انجام شد.\nسفارش #{order.id}"),
+                    rtl(f"✅ <b>تمدید رایگان (ادمین)</b> انجام شد.\nسفارش #{order.id}\n\n{card}")
+                    + gift_note,
                     parse_mode="HTML",
+                    reply_markup=main_menu_keyboard(),
                 )
             else:
-                panel = await approve_order(session, order)
-                config_block = format_vpn_config(panel["links"])
                 await query.message.reply_text(
-                    rtl(
-                        f"✅ <b>اشتراک رایگان (ادمین)</b> ایجاد شد.\n\n"
-                        f"📦 {escape(order.package_label)} | {order.duration_days} روز\n\n"
-                        f"{config_block}"
-                    ),
+                    rtl(f"✅ <b>اشتراک رایگان (ادمین)</b> ایجاد شد.\n\n{card}") + gift_note,
                     parse_mode="HTML",
+                    reply_markup=main_menu_keyboard(),
                 )
+            # Order settled: drop the stale inline pay button (if this message
+            # is the gateway prompt) and clear pending markers so the
+            # awaiting-payment guard can't auto-cancel anything afterwards.
+            # Main-menu keyboard above already replaced the cancel-only one.
+            with contextlib.suppress(Exception):
+                await query.message.edit_reply_markup(reply_markup=None)
+            for _key in (
+                "order_id",
+                "pay_message_id",
+                "pending_order_id",
+                "awaiting_discount_code",
+                "awaiting_discount_choice",
+            ):
+                context.user_data.pop(_key, None)
         except OrderAlreadyApproved:
             await query.message.reply_text(rtl("⚠️ این سفارش قبلاً تأیید شده است."), parse_mode="HTML")
             return
@@ -86,7 +114,7 @@ async def free_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
             log.warning("Admin free fulfillment failed for order #%s: %s", order_id, exc)
             await query.message.reply_text(
                 rtl(
-                    "❌ خطای سرور — تایید رایگان انجام نشد.\n"
+                    "❌ خطای سرور — تأیید رایگان انجام نشد.\n"
                     f"<code>{escape(str(exc))}</code>"
                 ),
                 parse_mode="HTML",

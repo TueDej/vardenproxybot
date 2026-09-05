@@ -24,8 +24,8 @@ def _package_buttons():
 
 
 CANCEL_BUTTON = "❌ انصراف"
-CHOICE_HAVE_CODE = "🎟️ دارم کد تخفیف"
-CHOICE_NO_CODE = "⏭️ نه، ادامه"
+CHOICE_HAVE_CODE = "🎟️ کد تخفیف دارم"
+CHOICE_NO_CODE = "⏭️ ادامه بدون تخفیف"
 
 
 def main_menu_keyboard():
@@ -64,8 +64,8 @@ def discount_prompt_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(_btn("🎟️ بله، کد دارم"), callback_data="disc|yes"),
-                InlineKeyboardButton(_btn("⏭️ نه، ادامه بدون تخفیف"), callback_data="disc|no"),
+                InlineKeyboardButton(_btn("🎟️ بله، کد تخفیف دارم"), callback_data="disc|yes"),
+                InlineKeyboardButton(_btn("⏭️ ادامه بدون تخفیف"), callback_data="disc|no"),
             ]
         ]
     )
@@ -110,6 +110,6 @@ def payment_keyboard(public_url: str | None, order_id: int, is_admin: bool) -> I
         buttons.append([InlineKeyboardButton(_btn("💳 پرداخت با زرین‌پال"), url=public_url)])
     if is_admin:
         buttons.append(
-            [InlineKeyboardButton(_btn("✅ تایید رایگان (ادمین)"), callback_data=f"free|{order_id}")]
+            [InlineKeyboardButton(_btn("✅ تأیید رایگان (ادمین)"), callback_data=f"free|{order_id}")]
         )
     return InlineKeyboardMarkup(buttons)

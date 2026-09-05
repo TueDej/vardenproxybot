@@ -13,9 +13,10 @@ from handlers.buy import (
     OrderAlreadyApproved,
     OrderNotApprovable,
     approve_order,
-    format_vpn_config,
     renew_order,
 )
+from keyboards import main_menu_keyboard
+from message_render import subscription_card
 from models import Order
 from rtl import rtl
 from vpn_service import VPNPanelError, VPNPanelService
@@ -64,7 +65,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 panel = await approve_order(session, order)
         except OrderAlreadyApproved:
             await update.message.reply_text(
-                rtl(f"⚠️ سفارش #{order_id} هم‌اکنون توسط شخص دیگری تأیید شد.")
+                rtl(f"⚠️ سفارش #{order_id} هم‌اکنون تأیید شده است.")
             )
             return
         except OrderNotApprovable as exc:
@@ -80,28 +81,33 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        package_label = escape(order.package_label)
-        config_block = format_vpn_config(panel["links"])
+        # Same card the profile shows — one shared renderer for every path.
+        is_gift = bool(getattr(order, "is_gift", False))
+        card_email = panel.get("email") or order.panel_email or order.renew_email or ""
+        card = await subscription_card(
+            card_email, order.data_gb, order.duration_days, panel.get("links")
+        )
+        gift_note = rtl("\n\n🎁 <i>این اشتراک هدیه است — قابل تمدید نیست.</i>") if is_gift else ""
+        if order.renew_email:
+            admin_header = f"✅ تمدید سفارش #{order_id} تأیید شد."
+            user_header = f"🎉 <b>تمدید سفارش #{order_id} شما تأیید شد!</b>"
+        else:
+            admin_header = f"✅ سفارش #{order_id} تأیید شد."
+            user_header = f"🎉 <b>سفارش #{order_id} شما تأیید شد!</b>"
         await update.message.reply_text(
-            rtl(
-                f"✅ سفارش #{order_id} تأیید شد.\n"
-                f"📦 {package_label} | {order.duration_days} روز\n"
-                f"{config_block}"
-            ),
+            rtl(f"{admin_header}\n\n{card}") + gift_note,
             parse_mode="HTML",
         )
 
-        # Notify the user (selectinload above makes .user safe to access here)
+        # Notify the user (selectinload above makes .user safe to access here).
+        # Main-menu keyboard: while the order was pending the buyer's keyboard
+        # was cancel-only — without this they stay stuck on ❌ انصراف.
         try:
             await context.bot.send_message(
                 chat_id=order.user.telegram_id,
-                text=rtl(
-                    f"🎉 <b>سفارش #{order_id} شما تأیید شد!</b>\n\n"
-                    f"📦 پکیج: {package_label}\n"
-                    f"{config_block}\n\n"
-                    "لینک vless را در برنامه V2Ray/Nekoray/Streisand وارد کنید تا متصل شوید."
-                ),
+                text=rtl(f"{user_header}\n\n{card}") + gift_note,
                 parse_mode="HTML",
+                reply_markup=main_menu_keyboard(),
             )
         except TelegramError as exc:
             log.warning(
@@ -129,7 +135,7 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
         orders = result.scalars().all()
 
     if not orders:
-        await update.message.reply_text(rtl("📋 سفارش در انتظار تأییدی وجود ندارد."))
+        await update.message.reply_text(rtl("📋 سفارش در انتظار تأیید وجود ندارد."))
         return
 
     lines = ["📋 <b>سفارش‌های در انتظار تأیید:</b>\n"]
