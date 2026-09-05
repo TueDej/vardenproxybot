@@ -798,61 +798,15 @@ body > .box {
   .card-block { padding: 12px; }
   .hint { font-size: 11px; }
 
-  /* ── data tables become stacked cards ─────────────────────
-     Horizontal scroll for a 9-column table inside a scrolling page
-     is unusable on touch. Each row renders as a card; each cell shows
-     its data-label above the value. The packages editor keeps a real
-     table (inputs + drag reorder need the grid). */
-  #orders-table, #users-table, #discounts-table, #messages-log-table {
-    display: block;
-    min-width: 0;
-  }
-  #orders-table thead, #users-table thead,
-  #discounts-table thead, #messages-log-table thead { display: none; }
-  #orders-table tbody, #users-table tbody,
-  #discounts-table tbody, #messages-log-table tbody { display: block; padding: 4px; }
-  #orders-table tr, #users-table tr,
-  #discounts-table tr, #messages-log-table tr {
-    display: block;
-    margin: 8px 4px;
-    padding: 2px 12px;
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-  }
-  #orders-table tbody tr:hover, #users-table tbody tr:hover,
-  #discounts-table tbody tr:hover, #messages-log-table tbody tr:hover { background: var(--bg-raised); }
-  #orders-table td, #users-table td,
-  #discounts-table td, #messages-log-table td {
-    display: block;
-    padding: 7px 0;
-    border-bottom: none;
-  }
-  #orders-table td[data-label], #users-table td[data-label],
-  #discounts-table td[data-label], #messages-log-table td[data-label] {
-    padding: 7px 0 9px;
-    border-bottom: 1px solid var(--border);
-  }
-  #orders-table td:last-child, #users-table td:last-child,
-  #discounts-table td:last-child, #messages-log-table td:last-child { border-bottom: none; }
-  td[data-label]::before {
-    content: attr(data-label);
-    display: block;
-    margin-bottom: 1px;
-    font-family: var(--mono);
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-  /* cells without data-label (loading/empty colspan rows) render plain */
-  #orders-table td:not([data-label]), #users-table td:not([data-label]),
-  #discounts-table td:not([data-label]), #messages-log-table td:not([data-label]) { padding: 10px 2px; }
-  #orders-table td[data-label] code, #users-table td[data-label] code { font-size: 12px; }
-  .col-preview { max-width: none; overflow: visible; text-overflow: unset; white-space: normal; }
+  /* tables scroll horizontally inside their panel — simple and predictable */
+  .table-wrap { -webkit-overflow-scrolling: touch; }
+  th, td { padding: 8px 9px; }
+  td { font-size: 12px; }
+  /* narrower floor on phones: codes wrap, so 620px fits all 9 columns */
+  #orders-table { min-width: 620px; }
+  .col-preview { max-width: 220px; }
 
-  /* packages editor: keep the table, scroll it, fix iOS zoom on inputs */
+  /* packages editor: wider floor so inputs stay usable */
   #packages-table { min-width: 640px; }
   #packages-table input { height: 36px; font-size: 16px; min-width: 96px; }
 
@@ -886,7 +840,4 @@ body > .box {
   .toolbar select, .toolbar input[type="date"] { flex: 1 1 100%; }
   .row > .btn { flex: 1 1 100%; }
   .row > .btn + .feedback { flex-basis: 100%; }
-
-  #orders-table tr, #users-table tr,
-  #discounts-table tr, #messages-log-table tr { margin: 8px 2px; padding: 2px 10px; }
 }
