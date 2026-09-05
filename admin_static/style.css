@@ -101,7 +101,9 @@ code {
 .stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 
-.feedback { font-size: 12px; min-height: 1em; font-family: var(--mono); }
+.feedback { font-size: 12px; font-family: var(--mono); }
+/* no reserved slot when there is nothing to say */
+.feedback:empty { display: none; }
 .feedback.ok { color: var(--accent); }
 .feedback.err { color: var(--danger); }
 .feedback.warn { color: var(--warn); }
@@ -634,6 +636,10 @@ tr.drag-over { outline: 1px dashed var(--accent); outline-offset: -1px; backgrou
 
 .packages-actions { display: flex; gap: 8px; align-items: center; padding: 10px; border-top: 1px solid var(--border); }
 
+/* save result: full-width footer row inside the panel, roomy when shown,
+   gone entirely (with its border) when empty */
+#pkg-msg { padding: 10px 12px; border-top: 1px solid var(--border); }
+
 /* ── Message preview ───────────────────────────────────────── */
 #msg-preview-box { padding: 0; border: none; background: transparent; }
 
@@ -804,6 +810,13 @@ body > .box {
   td { font-size: 12px; }
   /* narrower floor on phones: codes wrap, so 620px fits all 9 columns */
   #orders-table { min-width: 620px; }
+  /* Long payment codes must stay on ONE line — wrapping mid-string makes
+     rows absurdly tall. Give these columns their natural width instead;
+     the panel scrolls horizontally, so extra width is fine. */
+  #orders-table .cell-copy code { white-space: nowrap; overflow-wrap: normal; word-break: keep-all; }
+  #orders-table td:nth-child(6) { min-width: 130px; } /* Ref ID */
+  #orders-table td:nth-child(7) { min-width: 270px; } /* Authority */
+  #orders-table td:nth-child(8) { min-width: 210px; } /* Panel Email */
   .col-preview { max-width: 220px; }
 
   /* packages editor: wider floor so inputs stay usable */
