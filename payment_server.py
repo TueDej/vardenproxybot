@@ -162,7 +162,7 @@ def _admin_login_page(error: str | None = None) -> web.Response:
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Varden Admin — Login</title>
-<link rel="stylesheet" href="/admin/static/style.css?v=5">
+<link rel="stylesheet" href="/admin/static/style.css?v=6">
 </head>
 <body><div class="login-wrap"><form class="login-card" method="POST" action="/admin/login">
 <div class="login-brand">
@@ -377,6 +377,22 @@ async def rate_limit_middleware(request: web.Request, handler):
                     headers={"Retry-After": str(max(1, retry))},
                 )
     return await handler(request)
+
+
+@web.middleware
+async def admin_no_cache_middleware(request: web.Request, handler):
+    """Force revalidation of admin pages and static assets.
+
+    aiohttp static responses carry ETag/Last-Modified but no Cache-Control,
+    so browsers apply heuristic freshness and serve stale app.js after a
+    deploy — old JS against a new index.html throws and leaves tabs stuck
+    on "Loading…". no-cache keeps 304 revalidation (cheap) but guarantees
+    the browser asks on every load.
+    """
+    resp = await handler(request)
+    if request.path.startswith(ADMIN_PREFIX):
+        resp.headers.setdefault("Cache-Control", "no-cache")
+    return resp
 
 
 @web.middleware
@@ -2107,7 +2123,9 @@ async def handle_health(request: web.Request) -> web.Response:
 
 def build_app(application) -> web.Application:
     # rate_limit first so 429s are cheap, then auth
-    app = web.Application(middlewares=[rate_limit_middleware, admin_auth_middleware])
+    app = web.Application(
+        middlewares=[rate_limit_middleware, admin_no_cache_middleware, admin_auth_middleware]
+    )
     app["ptb_application"] = application
     app.router.add_get(CALLBACK_PATH, handle_zarinpal_callback)
     app.router.add_get("/zarinpal/start/{authority}", handle_zarinpal_start)
