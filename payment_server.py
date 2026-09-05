@@ -5,6 +5,7 @@ TLS on the public domain and forwards here.
 """
 
 import asyncio
+import base64
 import collections
 import contextlib
 import hmac
@@ -64,7 +65,13 @@ from message_render import (
 )
 from models import DiscountCode, MessageLog, Order, User
 from rtl import rtl as _rtl
-from vpn_service import PanelRenewalLimitError, VPNPanelError, VPNPanelService
+from vpn_service import (
+    PanelRenewalLimitError,
+    VPNPanelError,
+    VPNPanelService,
+    client_used_bytes,
+    set_link_remark,
+)
 from zarinpal import ZarinpalError, reverse_payment, verify_payment
 
 log = logging.getLogger(__name__)
@@ -273,6 +280,7 @@ _RATE_LIMITS: dict[str, tuple[int, int]] = {
     CALLBACK_PATH: (20, 60),  # Zarinpal callback: 20/min per IP+authority
     "/zarinpal/start": (30, 60),  # start page: 30/min per IP
     ADMIN_PREFIX: (180, 60),  # admin API/UI: 180/min per IP (was 60 — too tight for refreshes; 6 req/load → 30 refreshes/min)
+    "/zub": (60, 60),  # lite sub server: sub clients poll every few hours; 60/min/IP is plenty
     "/healthz": (120, 60),
 }
 
@@ -2121,6 +2129,90 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.Response(text="ok")
 
 
+# ── Lite subscription server (/zub/{sub_id}) ──────────────────────
+# The panel's own /sub/{subId} URLs point at the panel backend, which is only
+# reachable via the reverse proxy that fronts this bot server — so we serve
+# subscriptions ourselves: panel config links, rewritten for the public entry
+# (rewrite_vless_link), with a remark carrying the remaining traffic/days.
+
+_SUB_ID_RE = re.compile(r"^[A-Za-z0-9]{8,64}$")
+_SUB_REMARK_PREFIX = "Vard3n"
+_SUB_CACHE_TTL = 60.0  # seconds — survives multi-device refresh storms
+_sub_cache: dict[str, tuple[float, bytes, dict[str, str]]] = {}
+
+
+def _sub_remark(total_bytes: int, used_bytes: int | None, expiry_ms: int) -> str:
+    """Profile name shown in client apps: remaining data + days left."""
+    if total_bytes <= 0:
+        label = "Unlimited"
+    elif used_bytes is None:
+        label = "?GB"
+    else:
+        label = f"{round(max(0, total_bytes - used_bytes) / 1024**3, 1):g}GB"
+    days = ""
+    if expiry_ms > 0:
+        expires = datetime.fromtimestamp(expiry_ms / 1000, tz=UTC)
+        days = f" | {max(0, (expires - datetime.now(UTC)).days)}d"
+    return f"{_SUB_REMARK_PREFIX} {label}{days}"
+
+
+async def handle_sub(request: web.Request) -> web.Response:
+    sub_id = request.match_info.get("sub_id", "")
+    if not _SUB_ID_RE.fullmatch(sub_id):
+        return web.Response(status=404, text="Not found")
+
+    cached = _sub_cache.get(sub_id)
+    if cached and time.monotonic() - cached[0] < _SUB_CACHE_TTL:
+        _, body, headers = cached
+        return web.Response(body=body, headers=headers)
+
+    try:
+        client = await VPNPanelService.get_client_by_sub_id(sub_id)
+    except VPNPanelError as exc:
+        log.warning("Sub server panel error for %s...: %s", sub_id[:8], exc)
+        return web.Response(status=503, text="Panel unavailable, try again later")
+    if not isinstance(client, dict):
+        return web.Response(status=404, text="Not found")
+
+    email = str(client.get("email") or "")
+    try:
+        links = await VPNPanelService.get_client_links(email)
+    except VPNPanelError as exc:
+        log.warning("Sub server link fetch failed for %s: %s", email, exc)
+        links = []
+    if not links:
+        return web.Response(status=404, text="Not found")
+
+    total_bytes = max(0, int(client.get("totalGB") or 0))
+    used_bytes = client_used_bytes(client)
+    expiry_ms = int(client.get("expiryTime") or 0)
+    traffic = client.get("traffic") if isinstance(client.get("traffic"), dict) else client
+    try:
+        up = max(0, int(traffic.get("up") or 0))
+        down = max(0, int(traffic.get("down") or 0))
+    except (TypeError, ValueError):
+        up = down = 0
+
+    remark = _sub_remark(total_bytes, used_bytes, expiry_ms)
+    links = [set_link_remark(link, remark) for link in links]
+    body = base64.b64encode("\n".join(links).encode("utf-8"))
+    headers = {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Profile-Title": "base64:" + base64.b64encode(remark.encode("utf-8")).decode("ascii"),
+        "Profile-Update-Interval": "12",
+        "Subscription-Userinfo": (
+            f"upload={up}; download={down}; total={total_bytes}; expire={expiry_ms // 1000}"
+        ),
+        "Content-Disposition": f'attachment; filename="{_SUB_REMARK_PREFIX}"',
+    }
+    if len(_sub_cache) > 2000:
+        _sub_cache.clear()
+    _sub_cache[sub_id] = (time.monotonic(), body, headers)
+    log.info("Sub served: %s (%s) %s", email, remark, _client_ip(request))
+    return web.Response(body=body, headers=headers)
+
+
 def build_app(application) -> web.Application:
     # rate_limit first so 429s are cheap, then auth
     app = web.Application(
@@ -2129,6 +2221,7 @@ def build_app(application) -> web.Application:
     app["ptb_application"] = application
     app.router.add_get(CALLBACK_PATH, handle_zarinpal_callback)
     app.router.add_get("/zarinpal/start/{authority}", handle_zarinpal_start)
+    app.router.add_get("/zub/{sub_id}", handle_sub)
     app.router.add_get("/healthz", handle_health)
     # Admin panel — login is public, rest is session-protected
     app.router.add_get("/admin/login", handle_admin_login_get)

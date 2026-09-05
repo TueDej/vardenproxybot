@@ -57,6 +57,7 @@ VAR_SPEC=(
     "ZARINPAL_ZARINGATE|Bypass checkout page direct to bank? (true/false)|true|false"
     "ZARINPAL_BIND_HOST|Payment callback bind host|127.0.0.1|false"
     "ZARINPAL_BIND_PORT|Payment callback bind port|8099|false"
+    "SUB_BASE_URL|Public base for /zub/ sub links (blank = callback domain)||false"
     "ADMIN_PANEL_USER|Admin panel username|admin|false"
     "ADMIN_PANEL_PASS|Admin panel password (BasicAuth)||false"
 )

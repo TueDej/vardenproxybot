@@ -56,6 +56,9 @@ class Config:
     admin_panel_user: str = "admin"
     admin_panel_pass: str = ""
 
+    # Lite sub server (public base for /zub/{sub_id} subscription links)
+    sub_base_url: str = ""
+
     def __post_init__(self):
         self.bot_token = os.getenv("BOT_TOKEN", "")
         admin_ids_str = os.getenv("ADMIN_IDS", "")
@@ -100,6 +103,9 @@ class Config:
         # Admin panel
         self.admin_panel_user = os.getenv("ADMIN_PANEL_USER", self.admin_panel_user)
         self.admin_panel_pass = os.getenv("ADMIN_PANEL_PASS", self.admin_panel_pass)
+
+        # Lite sub server (public /zub/ links; default: ZARINPAL_CALLBACK_URL origin)
+        self.sub_base_url = os.getenv("SUB_BASE_URL", "").rstrip("/")
 
         # 3x-ui panel settings
         self.panel_url = os.getenv("PANEL_URL", "").rstrip("/")
@@ -181,6 +187,32 @@ class Config:
             return f"{public_base}/zarinpal/start/{authority}"
         except Exception:
             return self.zarinpal_startpay_url(authority)
+
+    @property
+    def sub_public_base_url(self) -> str:
+        """Origin serving the lite sub server (/zub/...), e.g. https://pay.example.ir.
+
+        SUB_BASE_URL wins; falls back to the origin of ZARINPAL_CALLBACK_URL
+        (the same reverse-proxied domain usually fronts both).
+        """
+        if self.sub_base_url:
+            return self.sub_base_url
+        if self.zarinpal_callback_url:
+            try:
+                parts = urlsplit(self.zarinpal_callback_url)
+            except ValueError:
+                return ""
+            if parts.scheme and parts.netloc:
+                return f"{parts.scheme}://{parts.netloc}"
+        return ""
+
+    def sub_url(self, sub_id: str) -> str:
+        """Public URL of the lite sub server for a panel subId ('' when unconfigured)."""
+        sub_id = (sub_id or "").strip()
+        base = self.sub_public_base_url
+        if not sub_id or not base:
+            return ""
+        return f"{base}/zub/{quote(sub_id, safe='')}"
 
     @property
     def proxy_url(self) -> str | None:

@@ -11,7 +11,7 @@ except ImportError:  # Python <3.11
 
     UTC = timezone.utc  # type: ignore[no-redef]  # noqa: UP017
 from datetime import datetime, timedelta
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -163,6 +163,21 @@ def normalize_links(obj) -> list[str]:
         elif isinstance(item, dict) and isinstance(item.get("url"), str):
             links.append(rewrite_vless_link(item["url"]))
     return links
+
+
+def set_link_remark(link: str, remark: str) -> str:
+    """Replace the fragment (profile name shown in client apps) of a config URI.
+
+    Non-URIs are returned unchanged; everything else keeps its structure and
+    only gets a fresh, URL-encoded fragment.
+    """
+    try:
+        parts = urlsplit(link)
+    except ValueError:
+        return link
+    if not parts.scheme or "://" not in link:
+        return link
+    return urlunsplit(parts._replace(fragment=quote(remark, safe="")))
 
 
 class VPNPanelService:
@@ -429,6 +444,18 @@ class VPNPanelService:
             }
 
         return list(await asyncio.gather(*(hydrate(c) for c in matching)))
+
+    @classmethod
+    async def get_client_by_sub_id(cls, sub_id: str) -> dict | None:
+        """Fetch a client payload by its subscription ID (subId), or None."""
+        sub_id = (sub_id or "").strip()
+        if not sub_id:
+            return None
+        data = await cls._request("GET", f"{CLIENTS_API}/list")
+        for c in data if isinstance(data, list) else []:
+            if isinstance(c, dict) and str(c.get("subId", "")) == sub_id:
+                return c
+        return None
 
     @classmethod
     async def get_subscription_links(cls, sub_id: str) -> list[str]:

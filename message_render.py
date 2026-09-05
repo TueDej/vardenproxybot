@@ -53,6 +53,13 @@ def format_links_block(links: list[str]) -> str:
     return _rtl("\n".join(lines))
 
 
+def format_sub_block(sub_url: str) -> str:
+    """Public subscription URL block — import once, auto-refreshes quota/expiry."""
+    if not sub_url:
+        return ""
+    return _rtl(f"🌐 <b>لینک اشتراک (آپدیت خودکار):</b>\n<pre><code>{escape(sub_url)}</code></pre>")
+
+
 def format_product_message(
     c: dict, expiry: datetime | None, online_emails: set[str], now: datetime
 ) -> str:
@@ -64,6 +71,9 @@ def format_product_message(
     online_tag = " 🟢 <i>آنلاین</i>" if c["email"] in online_emails else ""
     links_block = format_links_block(c["links"])
     suffix = f"\n{links_block}" if links_block else ""
+    sub_block = format_sub_block(_config.sub_url(str(c.get("sub_id") or "")))
+    if sub_block:
+        suffix += f"\n\n{sub_block}"
     # One fact per line: mixing LTR ("20GB"), digits and Persian on a single
     # line lets the bidi algorithm reorder them (📦 20GB | 2 دستگاه bug).
     return _rtl(
@@ -122,6 +132,7 @@ async def subscription_card(
     expiry_ms = build_expiry_ms(int(duration_days or 30))
     limit_ip = 0
     used_bytes: int | None = None
+    sub_id = ""
     live_links: list[str] | None = None
     online = False
     if email:
@@ -135,6 +146,7 @@ async def subscription_card(
                 limit_ip = int(info.get("limitIp", 0) or 0)
             with contextlib.suppress(TypeError, ValueError):
                 expiry_ms = int(info.get("expiryTime", expiry_ms) or expiry_ms)
+            sub_id = str(info.get("subId") or "")
             used_bytes = client_used_bytes(info)
         with contextlib.suppress(Exception):
             live_links = await VPNPanelService.get_client_links(email)
@@ -150,6 +162,7 @@ async def subscription_card(
     now = datetime.now(UTC)
     c = {
         "email": email or "",
+        "sub_id": sub_id,
         "total_gb": total_bytes,
         "limit_ip": limit_ip,
         "used_bytes": used_bytes,
