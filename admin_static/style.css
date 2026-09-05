@@ -52,6 +52,12 @@ html, body {
   line-height: 1.5;
 }
 
+/* A wide table must scroll inside its panel — never stretch the page. */
+html, body { overflow-x: hidden; }
+@supports (overflow: clip) {
+  html, body { overflow-x: clip; }
+}
+
 /* subtle dot-grid texture */
 body {
   background-image: radial-gradient(rgba(180, 244, 97, 0.05) 1px, transparent 1px);
@@ -221,7 +227,9 @@ code {
 }
 
 /* ── Main column ───────────────────────────────────────────── */
-.main { height: 100vh; overflow-y: auto; padding: 0 18px 24px; }
+/* min-width:0 — grid items default to min-width:auto, which lets a wide
+   table force the whole column (and page) wider than the viewport. */
+.main { height: 100vh; overflow-y: auto; padding: 0 18px 24px; min-width: 0; }
 
 .topbar {
   position: sticky;
@@ -475,6 +483,7 @@ input[type="date"] { color-scheme: dark; }
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  min-width: 0;
 }
 
 .search-box {
@@ -506,6 +515,7 @@ input[type="date"] { color-scheme: dark; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  min-width: 0;
   transition: border-color 0.12s;
 }
 .panel:hover { border-color: var(--border-2); }
@@ -548,8 +558,8 @@ input[type="date"] { color-scheme: dark; }
 }
 
 /* ── Tables ────────────────────────────────────────────────── */
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; }
+.table-wrap { overflow-x: auto; max-width: 100%; min-width: 0; }
+table { width: 100%; max-width: 100%; border-collapse: collapse; }
 
 th {
   padding: 8px 10px;
@@ -580,7 +590,11 @@ td code { font-size: 11px; }
 #orders-table td:last-child, #users-table td:last-child { font-family: var(--mono); font-size: 11.5px; }
 #orders-table { min-width: 860px; }
 
-.cell-copy { display: inline-flex; align-items: center; gap: 5px; }
+.cell-copy { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; }
+/* Long unbroken strings (ZarinPal authority, ref IDs, emails) must wrap
+   instead of forcing their column — and the table — wider. Copy buttons
+   and full values (via title attr) keep them usable. */
+.cell-copy code { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
 .copy {
   display: inline-flex;
   align-items: center;
@@ -854,10 +868,11 @@ body > .box {
   .hint { font-size: 11px; }
 
   /* tables scroll horizontally inside their panel */
-  .table-wrap { -webkit-overflow-scrolling: touch; }
+  .table-wrap { -webkit-overflow-scrolling: touch; max-width: 100%; }
   th, td { padding: 8px 9px; }
   td { font-size: 12px; }
-  #orders-table { min-width: 860px; }
+  /* narrower floor on phones: codes wrap now, so 620px fits all 9 columns */
+  #orders-table { min-width: 620px; }
   .col-preview { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .packages-actions { flex-wrap: wrap; }
