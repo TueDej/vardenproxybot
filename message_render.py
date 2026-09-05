@@ -56,18 +56,12 @@ def format_links_block(links: list[str]) -> str:
 def format_sub_block(sub_url: str) -> str:
     """Public subscription URL block — import once, auto-refreshes quota/expiry.
 
-    Telegram renders short single-line code blocks as compact chips:
-    shrink-to-fit width on Desktop, no Copy button on Android. Pad the
-    line so the block wraps to full width and gets the regular code
-    block treatment (same as the config links). The trailing spaces are
-    trimmed by VPN apps when the URL is pasted/imported.
+    Plain text on its own line: Telegram autolinks it (tap to open,
+    long-press to copy) with no code-block rendering quirks.
     """
     if not sub_url:
         return ""
-    padded = sub_url.ljust(80)
-    return _rtl(
-        f"🌐 <b>لینک اشتراک (آپدیت خودکار):</b>\n<pre><code>{escape(padded)}</code></pre>"
-    )
+    return _rtl(f"🌐 <b>لینک اشتراک (آپدیت خودکار):</b>\n{escape(sub_url)}")
 
 
 def format_product_message(

@@ -1,5 +1,4 @@
 import logging
-from html import escape
 
 try:
     from datetime import UTC
@@ -715,9 +714,3 @@ async def approve_order(session, order: Order) -> dict:
         ) from None
 
     return {"email": email, "sub_id": sub_id, "links": links}
-
-
-def format_vpn_config(links: list[str]) -> str:
-    """Format the config block (vless URIs) for a message."""
-    # Links themselves are LTR with no Persian — no rtl() wrapper needed.
-    return "\n".join(f"🔗 <code>{escape(link)}</code>" for link in links if link)
