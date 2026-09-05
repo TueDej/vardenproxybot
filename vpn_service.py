@@ -373,7 +373,8 @@ class VPNPanelService:
         """Return all panel clients for a user, fetched via /clients/list.
 
         Each dict has: email, sub_id, enable, expiry_time, total_gb,
-        limit_ip, links, sub_links
+        limit_ip, used_bytes (None when the panel doesn't report traffic),
+        links, sub_links
         """
         data = await cls._request("GET", f"{CLIENTS_API}/list")
         raw_clients = [c for c in (data if isinstance(data, list) else []) if isinstance(c, dict)]
@@ -390,6 +391,14 @@ class VPNPanelService:
                     cls.get_client_links(email),
                     cls.get_subscription_links(sub_id),
                 )
+            # Panel traffic counters (up/down bytes); None when the panel
+            # doesn't report them so the UI shows نامشخص instead of a lie.
+            used_bytes: int | None = None
+            if c.get("up") is not None or c.get("down") is not None:
+                try:
+                    used_bytes = max(0, int(c.get("up") or 0)) + max(0, int(c.get("down") or 0))
+                except (TypeError, ValueError):
+                    used_bytes = None
             return {
                 "email": email,
                 "sub_id": sub_id,
@@ -397,6 +406,7 @@ class VPNPanelService:
                 "expiry_time": c.get("expiryTime", 0),
                 "total_gb": c.get("totalGB", 0),
                 "limit_ip": c.get("limitIp", 0),
+                "used_bytes": used_bytes,
                 "links": links,
                 "sub_links": sub_links,
             }

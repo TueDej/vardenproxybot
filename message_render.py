@@ -33,6 +33,17 @@ def data_label(total_gb: int) -> str:
     return "Unlimited" if total_gb == 0 else f"{total_gb // (1024 ** 3)}GB"
 
 
+def remaining_data_label(total_bytes: int, used_bytes: int | None) -> str:
+    """Remaining traffic label: unlimited plans show نامحدود, unknown usage نامشخص."""
+    total = max(0, int(total_bytes or 0))
+    if total == 0:
+        return "نامحدود"
+    if used_bytes is None:
+        return "نامشخص"
+    remaining_gb = max(0, total - max(0, int(used_bytes))) / 1024**3
+    return f"{round(remaining_gb, 1):g}GB"
+
+
 def format_links_block(links: list[str]) -> str:
     if not links:
         return ""
@@ -53,8 +64,12 @@ def format_product_message(
     online_tag = " 🟢 <i>آنلاین</i>" if c["email"] in online_emails else ""
     links_block = format_links_block(c["links"])
     suffix = f"\n{links_block}" if links_block else ""
+    # One fact per line: mixing LTR ("20GB"), digits and Persian on a single
+    # line lets the bidi algorithm reorder them (📦 20GB | 2 دستگاه bug).
     return _rtl(
-        f"📦 {data_label(c['total_gb'])} | {c['limit_ip']} دستگاه{online_tag}\n"
+        f"📦 {data_label(c['total_gb'])}\n"
+        f"📱 تعداد دستگاه: {c['limit_ip']}{online_tag}\n"
+        f"📊 حجم باقی‌مانده: {remaining_data_label(c['total_gb'], c.get('used_bytes'))}\n"
         f"{expiry_line}"
         f"{suffix}"
     )
@@ -63,14 +78,19 @@ def format_product_message(
 def format_expired_message(c: dict, expiry: datetime | None) -> str:
     when = expiry.strftime("%Y-%m-%d") if expiry else "نامشخص"
     return _rtl(
-        f"⌛ <b>منقضی‌شده</b> — {data_label(c['total_gb'])}، پایان: {when}\n"
+        f"⌛ <b>منقضی‌شده</b> — {data_label(c['total_gb'])}\n"
+        f"📱 تعداد دستگاه: {c['limit_ip']}\n"
+        f"📊 حجم باقی‌مانده: {remaining_data_label(c['total_gb'], c.get('used_bytes'))}\n"
+        f"📅 پایان: {when}\n"
         "برای تمدید روی دکمه زیر بزنید یا گزینه 🛒 خرید اشتراک را انتخاب کنید."
     )
 
 
 def format_disabled_message(c: dict, expiry: datetime | None) -> str:
     return _rtl(
-        f"🚫 <b>غیرفعال</b> — {data_label(c['total_gb'])} | {c['limit_ip']} دستگاه\n"
+        f"🚫 <b>غیرفعال</b> — {data_label(c['total_gb'])}\n"
+        f"📱 تعداد دستگاه: {c['limit_ip']}\n"
+        f"📊 حجم باقی‌مانده: {remaining_data_label(c['total_gb'], c.get('used_bytes'))}\n"
         f"⏳ انقضا: {expiry.strftime('%Y-%m-%d') if expiry else 'ندارد'}\n"
         "با پشتیبانی تماس بگیرید."
     )
@@ -101,6 +121,7 @@ async def subscription_card(
     total_bytes = max(0, int(data_gb or 0)) * 1024**3
     expiry_ms = build_expiry_ms(int(duration_days or 30))
     limit_ip = 0
+    used_bytes: int | None = None
     live_links: list[str] | None = None
     online = False
     if email:
@@ -114,6 +135,9 @@ async def subscription_card(
                 limit_ip = int(info.get("limitIp", 0) or 0)
             with contextlib.suppress(TypeError, ValueError):
                 expiry_ms = int(info.get("expiryTime", expiry_ms) or expiry_ms)
+            if info.get("up") is not None or info.get("down") is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    used_bytes = max(0, int(info.get("up") or 0)) + max(0, int(info.get("down") or 0))
         with contextlib.suppress(Exception):
             live_links = await VPNPanelService.get_client_links(email)
         with contextlib.suppress(Exception):
@@ -130,6 +154,7 @@ async def subscription_card(
         "email": email or "",
         "total_gb": total_bytes,
         "limit_ip": limit_ip,
+        "used_bytes": used_bytes,
         "links": live_links,
     }
     return format_product_message(c, expiry_dt(expiry_ms), {email} if online and email else set(), now)
