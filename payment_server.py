@@ -60,6 +60,7 @@ from message_render import (
     format_product_message as _msg_format_product,
 )
 from models import DiscountCode, MessageLog, Order, User
+from rtl import rtl as _rtl
 from vpn_service import PanelRenewalLimitError, VPNPanelError, VPNPanelService
 from zarinpal import ZarinpalError, reverse_payment, verify_payment
 
@@ -69,7 +70,7 @@ CALLBACK_PATH = "/zarinpal/callback"
 ADMIN_PREFIX = "/admin"
 
 _PAGE = """<!DOCTYPE html>
-<html lang="fa"><head><meta charset="utf-8">
+<html lang="fa" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VardenProxy</title>
 <style>body{{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
@@ -1360,7 +1361,7 @@ async def handle_admin_generate_subscription(request: web.Request) -> web.Respon
                         text = "🎁 <b>هدیه اشتراک</b>\n\n" + "\n\n".join(parts[:2]) if parts else "🎁 اشتراک هدیه فعال شد."
                     else:
                         text = f"🎁 <b>اشتراک هدیه</b> {escape(label)} فعال شد."
-                await application.bot.send_message(chat_id=telegram_id, text=text, parse_mode="HTML")
+                await application.bot.send_message(chat_id=telegram_id, text=_rtl(text), parse_mode="HTML")
                 notify_ok = True
             except Exception as e:
                 notify_error = str(e)
@@ -1582,6 +1583,7 @@ async def handle_admin_messages_send(request: web.Request) -> web.Response:
                 for msg in messages:
                     if len(msg) > 4000:
                         msg = msg[:3990] + "…"
+                    msg = _rtl(msg)
                     async with _MSG_SEND_SEM:
                         try:
                             await bot.send_message(chat_id=telegram_id, text=msg, parse_mode="HTML")
@@ -1933,7 +1935,7 @@ async def _notify(application, chat_id: int, text: str | None) -> None:
             )
         await application.bot.send_message(
             chat_id=chat_id,
-            text=text,
+            text=_rtl(text),
             parse_mode="HTML",
             reply_markup=main_menu_keyboard(),
         )
@@ -1943,6 +1945,7 @@ async def _notify(application, chat_id: int, text: str | None) -> None:
 
 async def _notify_admins(application, text: str) -> None:
     """Best-effort alert to every configured admin."""
+    text = _rtl(text)
     for admin_id in config.admin_ids:
         try:
             await application.bot.send_message(chat_id=admin_id, text=text, parse_mode="HTML")

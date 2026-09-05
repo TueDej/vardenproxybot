@@ -25,6 +25,7 @@ from keyboards import (
 )
 from models import Order, User
 from packages import DURATION_DAYS
+from rtl import rtl, strip_bidi
 from vpn_service import VPNPanelError, VPNPanelService
 from zarinpal import ZarinpalError, verify_payment
 
@@ -209,13 +210,13 @@ def purchase_blocked_reason(telegram_id: int) -> str | None:
 
         _, _, _paused = _pkg.load_packages()[:3]
         if _paused and telegram_id not in config.admin_ids:
-            return "⏸ سرویس در حال به‌روزرسانی است — لطفاً چند دقیقه بعد دوباره تلاش کنید."
+            return rtl("⏸ سرویس در حال به‌روزرسانی است — لطفاً چند دقیقه بعد دوباره تلاش کنید.")
     except Exception:
         pass
     if not config.zarinpal_configured:
-        return "💳 پرداخت‌ها موقتاً در دسترس نیستند.\nلطفاً بعداً تلاش کنید یا با پشتیبانی تماس بگیرید."
+        return rtl("💳 پرداخت‌ها موقتاً در دسترس نیستند.\nلطفاً بعداً تلاش کنید یا با پشتیبانی تماس بگیرید.")
     if config.zarinpal_sandbox and telegram_id not in config.admin_ids:
-        return "🔒 <b>حالت آزمایشی</b> — فعلاً فقط مدیر فروشگاه امکان خرید دارد."
+        return rtl("🔒 <b>حالت آزمایشی</b> — فعلاً فقط مدیر فروشگاه امکان خرید دارد.")
     return None
 
 
@@ -248,7 +249,7 @@ async def get_or_create_user(session, telegram_user) -> User:
 
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_cooldown(update.effective_user.id, "buy_start", 5):
-        await update.message.reply_text("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید.")
+        await update.message.reply_text(rtl("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید."))
         return
     blocked = purchase_blocked_reason(update.effective_user.id)
     if blocked:
@@ -256,8 +257,10 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     context.user_data.clear()
     await update.message.reply_text(
-        "🛒 <b>انتخاب پکیج</b>\n\n"
-        "اشتراک‌ها یک‌ماهه هستند؛ یکی را انتخاب کنید:",
+        rtl(
+            "🛒 <b>انتخاب پکیج</b>\n\n"
+            "اشتراک‌ها یک‌ماهه هستند؛ یکی را انتخاب کنید:"
+        ),
         reply_markup=packages_keyboard(),
         parse_mode="HTML",
     )
@@ -265,12 +268,12 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def package_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_cooldown(update.effective_user.id, "package_selected", 8):
-        await update.message.reply_text("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید.")
+        await update.message.reply_text(rtl("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید."))
         return
-    text = (update.message.text or "").strip()
+    text = strip_bidi((update.message.text or "").strip())
     pkg = _get_package_map().get(text)
     if not pkg:
-        await update.message.reply_text("❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید.")
+        await update.message.reply_text(rtl("❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید."))
         return
 
     blocked = purchase_blocked_reason(update.effective_user.id)
@@ -347,7 +350,7 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not order_id or not order:
         await update.message.reply_text(
-            "❌ سفارش در انتظاری برای لغو وجود ندارد.",
+            rtl("❌ سفارش در انتظاری برای لغو وجود ندارد."),
             reply_markup=main_menu_keyboard(),
         )
         return
@@ -365,7 +368,7 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if claim.rowcount == 0:
             await update.message.reply_text(
-                "❌ سفارش در انتظاری برای لغو وجود ندارد.",
+                rtl("❌ سفارش در انتظاری برای لغو وجود ندارد."),
                 reply_markup=main_menu_keyboard(),
             )
             return
@@ -399,7 +402,7 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("awaiting_discount_choice", None)
     context.user_data.pop("pending_order_id", None)
     await update.message.reply_text(
-        f"❌ سفارش #{order_id} لغو شد.",
+        rtl(f"❌ سفارش #{order_id} لغو شد."),
         reply_markup=main_menu_keyboard(),
     )
 
@@ -716,4 +719,5 @@ async def approve_order(session, order: Order) -> dict:
 
 def format_vpn_config(links: list[str]) -> str:
     """Format the config block (vless URIs) for a message."""
+    # Links themselves are LTR with no Persian — no rtl() wrapper needed.
     return "\n".join(f"🔗 <code>{escape(link)}</code>" for link in links if link)

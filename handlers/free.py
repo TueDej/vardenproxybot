@@ -16,6 +16,7 @@ from handlers.buy import (
     renew_order,
 )
 from models import Order
+from rtl import rtl
 from vpn_service import VPNPanelError
 
 log = logging.getLogger(__name__)
@@ -38,49 +39,56 @@ async def free_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     user = update.effective_user
     if user is None or user.id not in config.admin_ids:
-        await query.message.reply_text("⛔ دسترسی ندارید.", parse_mode="HTML")
+        await query.message.reply_text(rtl("⛔ دسترسی ندارید."), parse_mode="HTML")
         return
 
     async with async_session() as session:
         result = await session.execute(select(Order).where(Order.id == order_id))
         order = result.scalar_one_or_none()
         if order is None:
-            await query.message.reply_text("❌ سفارش یافت نشد.", parse_mode="HTML")
+            await query.message.reply_text(rtl("❌ سفارش یافت نشد."), parse_mode="HTML")
             return
         try:
             if order.renew_email:
                 await renew_order(session, order)
                 await query.message.reply_text(
-                    f"✅ <b>تمدید رایگان (ادمین)</b> انجام شد.\nسفارش #{order.id}",
+                    rtl(f"✅ <b>تمدید رایگان (ادمین)</b> انجام شد.\nسفارش #{order.id}"),
                     parse_mode="HTML",
                 )
             else:
                 panel = await approve_order(session, order)
                 config_block = format_vpn_config(panel["links"])
                 await query.message.reply_text(
-                    f"✅ <b>اشتراک رایگان (ادمین)</b> ایجاد شد.\n\n"
-                    f"📦 {escape(order.package_label)} | {order.duration_days} روز\n\n"
-                    f"{config_block}",
+                    rtl(
+                        f"✅ <b>اشتراک رایگان (ادمین)</b> ایجاد شد.\n\n"
+                        f"📦 {escape(order.package_label)} | {order.duration_days} روز\n\n"
+                        f"{config_block}"
+                    ),
                     parse_mode="HTML",
                 )
         except OrderAlreadyApproved:
-            await query.message.reply_text("⚠️ این سفارش قبلاً تأیید شده است.", parse_mode="HTML")
+            await query.message.reply_text(rtl("⚠️ این سفارش قبلاً تأیید شده است."), parse_mode="HTML")
             return
         except OrderNotApprovable as exc:
             # 60-day limit is surfaced as RenewalLimitExceeded (a subclass)
             if isinstance(exc, RenewalLimitExceeded):
                 await query.message.reply_text(
-                    f"⛔ تمدید ممکن نیست — مجموع زمان اشتراک پس از تمدید بیش از 60 روز می‌شود.\n<code>{escape(str(exc))}</code>",
+                    rtl(
+                        "⛔ تمدید ممکن نیست — مجموع زمان اشتراک پس از تمدید بیش از 60 روز می‌شود.\n"
+                        f"<code>{escape(str(exc))}</code>"
+                    ),
                     parse_mode="HTML",
                 )
             else:
-                await query.message.reply_text("⚠️ این سفارش قابل پرداخت نیست.", parse_mode="HTML")
+                await query.message.reply_text(rtl("⚠️ این سفارش قابل پرداخت نیست."), parse_mode="HTML")
             return
         except VPNPanelError as exc:
             log.warning("Admin free fulfillment failed for order #%s: %s", order_id, exc)
             await query.message.reply_text(
-                "❌ خطای سرور — تایید رایگان انجام نشد.\n"
-                f"<code>{escape(str(exc))}</code>",
+                rtl(
+                    "❌ خطای سرور — تایید رایگان انجام نشد.\n"
+                    f"<code>{escape(str(exc))}</code>"
+                ),
                 parse_mode="HTML",
             )
             return

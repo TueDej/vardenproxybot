@@ -19,6 +19,7 @@ from telegram.request import HTTPXRequest
 import payment_server
 from config import config
 from database import dispose_engine, init_db
+from rtl import rtl, strip_bidi
 from handlers.admin import approve, pending, stats
 from handlers.buy import (
     buy_start,
@@ -62,7 +63,7 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     if isinstance(update, Update) and update.effective_message:
         try:
             await update.effective_message.reply_text(
-                "⚠️ خطایی رخ داد؛ لطفاً کمی بعد دوباره تلاش کنید."
+                rtl("⚠️ خطایی رخ داد؛ لطفاً کمی بعد دوباره تلاش کنید.")
             )
         except TelegramError:
             log.warning("Could not deliver error notice to the user.")
@@ -98,7 +99,8 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if msg is None or not msg.text:
         return
     # Avoid reacting to messages that are actually commands (safety if filter changes)
-    text = (msg.text or "").strip()
+    # strip_bidi: RLM-prefixed button echoes must still match canonical labels
+    text = strip_bidi((msg.text or "").strip())
 
     # Explicit cancel — let cancel_order handle its own UX
     if text == "❌ انصراف" or text == "❌ Cancel":
@@ -130,8 +132,10 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if cancelled:
                 ids_str = ", #".join(str(i) for i in cancelled)
                 await update.effective_message.reply_text(
-                    f"❌ سفارش #{ids_str} به‌صورت خودکار لغو شد.\n"
-                    "💡 اگر پرداختی انجام شده باشد، مبلغ به‌صورت خودکار بازگردانده می‌شود.",
+                    rtl(
+                        f"❌ سفارش #{ids_str} به‌صورت خودکار لغو شد.\n"
+                        "💡 اگر پرداختی انجام شده باشد، مبلغ به‌صورت خودکار بازگردانده می‌شود."
+                    ),
                     parse_mode="HTML",
                     reply_markup=main_menu_keyboard(),
                 )
@@ -160,7 +164,7 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await package_selected(update, context)
         else:
             await update.effective_message.reply_text(
-                "❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید.",
+                rtl("❌ پکیج نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید."),
                 reply_markup=main_menu_keyboard(),
             )
             return
@@ -172,7 +176,7 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Unknown — return to home so user is not stuck on cancel-only keyboard
     else:
         await update.effective_message.reply_text(
-            "❓ گزینه نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید.",
+            rtl("❓ گزینه نامعتبر است؛ لطفاً از دکمه‌های زیر استفاده کنید."),
             reply_markup=main_menu_keyboard(),
         )
 

@@ -9,6 +9,7 @@ from database import async_session
 from handlers.buy import get_or_create_user, purchase_blocked_reason
 from handlers.rate_limit import check_cooldown
 from models import Order, User
+from rtl import rtl
 from packages import DURATION_DAYS, MAX_SUBSCRIPTION_DAYS, calc_price, load_packages
 from vpn_service import VPNPanelError, VPNPanelService
 
@@ -169,7 +170,7 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not await check_cooldown(update.effective_user.id, "renew", 8):
         if query.message:
-            await query.message.reply_text("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید.")
+            await query.message.reply_text(rtl("⏳ لطفاً کمی صبر کنید و دوباره تلاش کنید."))
         return
 
     email = ""
@@ -189,7 +190,7 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- IDOR fix: ensure email belongs to caller before any renewal logic ---
     if not await _is_renewal_owned(email, user.id):
         log.warning("Renewal IDOR blocked: user %s tried to renew %s", user.id, email)
-        await query.message.reply_text("⛔ این اشتراک متعلق به شما نیست.", parse_mode="HTML")
+        await query.message.reply_text(rtl("⛔ این اشتراک متعلق به شما نیست."), parse_mode="HTML")
         return
 
     # Gifts are not renewable
@@ -200,7 +201,10 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             if res.scalar_one_or_none() is not None:
                 await query.message.reply_text(
-                    "⛔ این اشتراک هدیه است و قابل تمدید نیست.\nبرای ادامه، لطفاً اشتراک جدید تهیه کنید.",
+                    rtl(
+                        "⛔ این اشتراک هدیه است و قابل تمدید نیست.\n"
+                        "برای ادامه، لطفاً اشتراک جدید تهیه کنید."
+                    ),
                     parse_mode="HTML",
                 )
                 return
@@ -214,7 +218,7 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except VPNPanelError as exc:
         log.warning("Could not resolve renewal terms for %s: %s", email, exc)
         await query.message.reply_text(
-            "❌ خطای سرور — دریافت اطلاعات اشتراک ممکن نشد. لطفاً بعداً تلاش کنید.",
+            rtl("❌ خطای سرور — دریافت اطلاعات اشتراک ممکن نشد. لطفاً بعداً تلاش کنید."),
             parse_mode="HTML",
         )
         return
@@ -224,8 +228,10 @@ async def renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         allowed, remaining_days = await _check_renewal_limit(email, duration_days)
         if not allowed:
             await query.message.reply_text(
-                f"⛔ تمدید ممکن نیست — مجموع زمان اشتراک پس از تمدید بیش از {MAX_TOTAL_DAYS} روز می‌شود.\n"
-                f"⏳ باقی‌مانده فعلی: {remaining_days} روز — لطفاً پس از نزدیک شدن به انقضا دوباره تلاش کنید.",
+                rtl(
+                    f"⛔ تمدید ممکن نیست — مجموع زمان اشتراک پس از تمدید بیش از {MAX_TOTAL_DAYS} روز می‌شود.\n"
+                    f"⏳ باقی‌مانده فعلی: {remaining_days} روز — لطفاً پس از نزدیک شدن به انقضا دوباره تلاش کنید."
+                ),
                 parse_mode="HTML",
             )
             return

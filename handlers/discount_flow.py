@@ -23,25 +23,27 @@ from keyboards import (
     payment_keyboard,
 )
 from models import DiscountCode, Order, User
+from rtl import rtl, strip_bidi
 from zarinpal import ZarinpalError, request_payment
 
 log = logging.getLogger(__name__)
 
 # Shown while a discount code is awaited (sent with discount_entry_keyboard(),
 # so the skip/cancel buttons referenced in the text are actually on screen).
-ENTRY_PROMPT_TEXT = (
+ENTRY_PROMPT_TEXT = rtl(
     "✏️ لطفاً <b>کد تخفیف</b> خود را ارسال کنید.\n"
     "اگر کد ندارید، دکمه ⏭️ ادامه بدون تخفیف را بزنید.\n"
     "برای لغو، ❌ انصراف را بزنید."
 )
 
-INVALID_CODE_TEXT = (
+INVALID_CODE_TEXT = rtl(
     "❌ کد تخفیف نامعتبر است یا قبلاً استفاده شده.\n"
     "می‌توانید کد دیگری بفرستید، دکمه ⏭️ ادامه بدون تخفیف را بزنید "
     "یا ❌ انصراف را انتخاب کنید."
 )
 
 # Texts accepted as "continue without a discount" while a code is awaited
+# (compared after strip_bidi, so RLM-prefixed button echoes still match)
 SKIP_KEYWORDS = ("skip", "skip.", "رد", "بدون", "⏭️ ادامه بدون تخفیف", "ادامه بدون تخفیف")
 
 
@@ -69,14 +71,15 @@ async def send_discount_prompt(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data["awaiting_discount_choice"] = True
     context.user_data["awaiting_discount_code"] = False
     is_renew = bool(order.renew_email)
-    base_text = (
+    base_text = rtl(
         "🎟️ <b>کد تخفیف</b>\n"
         "هر کد فقط یک‌بار قابل استفاده است.\n\n"
+        + (
+            "قصد تمدید اشتراک خود را دارید؛ کد تخفیف دارید؟"
+            if is_renew
+            else "قصد خرید اشتراک جدید را دارید؛ کد تخفیف دارید؟"
+        )
     )
-    if is_renew:
-        base_text += "قصد تمدید اشتراک خود را دارید؛ کد تخفیف دارید؟"
-    else:
-        base_text += "قصد خرید اشتراک جدید را دارید؛ کد تخفیف دارید؟"
     await update.effective_message.reply_text(
         base_text, reply_markup=discount_choice_keyboard(), parse_mode="HTML"
     )
@@ -89,8 +92,8 @@ async def handle_discount_choice_text(update: Update, context: ContextTypes.DEFA
     through to the pending-order auto-cancel guard, so any other text still
     cancels the pending order (documented behavior).
     """
-    text = (update.effective_message.text or "").strip()
-    if text == CHOICE_HAVE_CODE:
+    text = strip_bidi((update.effective_message.text or "").strip())
+    if text == strip_bidi(CHOICE_HAVE_CODE):
         context.user_data["awaiting_discount_choice"] = False
         context.user_data["awaiting_discount_code"] = True
         await update.effective_message.reply_text(
@@ -99,7 +102,7 @@ async def handle_discount_choice_text(update: Update, context: ContextTypes.DEFA
             parse_mode="HTML",
         )
         return True
-    if text == CHOICE_NO_CODE:
+    if text == strip_bidi(CHOICE_NO_CODE):
         context.user_data["awaiting_discount_choice"] = False
         order_id = context.user_data.get("pending_order_id")
         if not order_id and update.effective_user:
@@ -110,7 +113,7 @@ async def handle_discount_choice_text(update: Update, context: ContextTypes.DEFA
         else:
             context.user_data.pop("pending_order_id", None)
             await update.effective_message.reply_text(
-                "⚠️ سفارش فعالی برای ادامه وجود ندارد؛ لطفاً از منوی اصلی دوباره شروع کنید.",
+                rtl("⚠️ سفارش فعالی برای ادامه وجود ندارد؛ لطفاً از منوی اصلی دوباره شروع کنید."),
                 reply_markup=main_menu_keyboard(),
             )
         return True
@@ -131,7 +134,7 @@ async def handle_disc_prompt_callback(update: Update, context: ContextTypes.DEFA
     if not order_id:
         context.user_data.pop("awaiting_discount_choice", None)
         await query.message.reply_text(
-            "⚠️ سفارشی در انتظار نیست؛ لطفاً از منوی اصلی شروع کنید.",
+            rtl("⚠️ سفارشی در انتظار نیست؛ لطفاً از منوی اصلی شروع کنید."),
             reply_markup=main_menu_keyboard(),
         )
         return
@@ -164,13 +167,14 @@ async def discount_code_entered(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data["awaiting_discount_code"] = False
         context.user_data.pop("awaiting_discount_choice", None)
         await update.effective_message.reply_text(
-            "⚠️ سفارشی در انتظار نیست؛ لطفاً از منوی اصلی شروع کنید.",
+            rtl("⚠️ سفارشی در انتظار نیست؛ لطفاً از منوی اصلی شروع کنید."),
             reply_markup=main_menu_keyboard(),
         )
         return
 
     # skip keyword / button → continue without discount
-    if text.lower() in SKIP_KEYWORDS or text in SKIP_KEYWORDS:
+    text_norm = strip_bidi(text)
+    if text_norm.lower() in SKIP_KEYWORDS or text_norm in SKIP_KEYWORDS:
         context.user_data["awaiting_discount_code"] = False
         await _resume_payment_for_order(update, context, order_id)
         return
@@ -185,7 +189,7 @@ async def discount_code_entered(update: Update, context: ContextTypes.DEFAULT_TY
             context.user_data.pop("awaiting_discount_choice", None)
             context.user_data.pop("pending_order_id", None)
             await update.effective_message.reply_text(
-                "⚠️ سفارش منقضی یا لغو شده است؛ لطفاً از منوی اصلی دوباره شروع کنید.",
+                rtl("⚠️ سفارش منقضی یا لغو شده است؛ لطفاً از منوی اصلی دوباره شروع کنید."),
                 reply_markup=main_menu_keyboard(),
             )
             return
@@ -240,8 +244,10 @@ async def discount_code_entered(update: Update, context: ContextTypes.DEFAULT_TY
         dc.used_order_id = order_obj.id
         context.user_data["awaiting_discount_code"] = False
         await update.effective_message.reply_text(
-            f"✅ کد تخفیف {escape(dc.code)} اعمال شد — <b>{dc.discount_percent}%</b> تخفیف.\n"
-            f"💰 مبلغ نهایی: <b>{new_amount:,} تومان</b> (از {original:,} تومان)",
+            rtl(
+                f"✅ کد تخفیف {escape(dc.code)} اعمال شد — <b>{dc.discount_percent}%</b> تخفیف.\n"
+                f"💰 مبلغ نهایی: <b>{new_amount:,} تومان</b> (از {original:,} تومان)"
+            ),
             parse_mode="HTML",
         )
     # Resume payment with discounted amount
@@ -270,7 +276,7 @@ async def _resume_payment_for_order(update: Update, context: ContextTypes.DEFAUL
                         "Failed to release discount code for dead order #%s", order.id, exc_info=True
                     )
             await update.effective_message.reply_text(
-                "⚠️ سفارش منقضی یا لغو شده است؛ لطفاً از منوی اصلی دوباره شروع کنید.",
+                rtl("⚠️ سفارش منقضی یا لغو شده است؛ لطفاً از منوی اصلی دوباره شروع کنید."),
                 reply_markup=main_menu_keyboard(),
             )
             return
@@ -299,7 +305,7 @@ async def _resume_payment_for_order(update: Update, context: ContextTypes.DEFAUL
                 context.user_data.pop("awaiting_discount_code", None)
                 context.user_data.pop("awaiting_discount_choice", None)
                 await update.effective_message.reply_text(
-                    "❌ <b>خطا در ایجاد پرداخت</b>\nلطفاً چند دقیقه بعد دوباره تلاش کنید.",
+                    rtl("❌ <b>خطا در ایجاد پرداخت</b>\nلطفاً چند دقیقه بعد دوباره تلاش کنید."),
                     reply_markup=main_menu_keyboard(),
                     parse_mode="HTML",
                 )
@@ -335,7 +341,7 @@ async def _resume_payment_for_order(update: Update, context: ContextTypes.DEFAUL
             f"🎟️ تخفیف {order.discount_percent}% — کد <code>{escape(order.discount_code or '')}</code>\n"
         )
     if is_renew:
-        gateway_text = (
+        gateway_text = rtl(
             f"💳 <b>تمدید اشتراک</b>\n\n"
             f"📦 پکیج: {escape(order.package_label)}\n"
             f"⏳ مدت: {order.duration_days} روز\n"
@@ -345,7 +351,7 @@ async def _resume_payment_for_order(update: Update, context: ContextTypes.DEFAUL
             f"⏰ اعتبار لینک پرداخت: <b>{expiry_minutes} دقیقه</b>"
         )
     else:
-        gateway_text = (
+        gateway_text = rtl(
             f"💳 <b>سفارش #{order.id}</b>\n\n"
             f"📦 پکیج: {escape(order.package_label)}\n"
             f"📅 مدت: یک ماه\n"
@@ -361,8 +367,10 @@ async def _resume_payment_for_order(update: Update, context: ContextTypes.DEFAUL
     context.user_data["pay_message_id"] = sent.message_id
     context.user_data.pop("pending_order_id", None)
     await update.effective_message.reply_text(
-        "⏳ منتظر پرداخت شما هستیم — به‌صورت خودکار تشخیص داده می‌شود.\n"
-        "⚠️ خروج از این صفحه سفارش را <b>لغو</b> می‌کند؛ برای لغو دستی ❌ انصراف را بزنید.",
+        rtl(
+            "⏳ منتظر پرداخت شما هستیم — به‌صورت خودکار تشخیص داده می‌شود.\n"
+            "⚠️ خروج از این صفحه سفارش را <b>لغو</b> می‌کند؛ برای لغو دستی ❌ انصراف را بزنید."
+        ),
         reply_markup=cancel_keyboard(),
         parse_mode="HTML",
     )

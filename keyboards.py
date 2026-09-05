@@ -1,6 +1,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 
 import packages as _pkg_mod
+from rtl import btn as _btn
 
 MAIN_MENU = [
     ["🛒 خرید اشتراک"],
@@ -17,8 +18,8 @@ def _package_buttons():
         pkgs = _pkg_mod.load_packages()[0]
     except Exception:
         pkgs = _pkg_mod.PACKAGES
-    rows = [[f"{p['label']} - {p['price']:,} تومان"] for p in pkgs]
-    rows.append(_HOME_ROW.copy())
+    rows = [[_btn(f"{p['label']} - {p['price']:,} تومان")] for p in pkgs]
+    rows.append([_btn(c) for c in _HOME_ROW])
     return rows
 
 
@@ -28,7 +29,7 @@ CHOICE_NO_CODE = "⏭️ نه، ادامه"
 
 
 def main_menu_keyboard():
-    return ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
+    return ReplyKeyboardMarkup([[_btn(c) for c in row] for row in MAIN_MENU], resize_keyboard=True)
 
 
 def packages_keyboard():
@@ -44,14 +45,14 @@ def cancel_keyboard():
     """
     return ReplyKeyboardMarkup(
         [
-            ["❌ انصراف"],
+            [_btn("❌ انصراف")],
         ],
         resize_keyboard=True,
     )
 
 
 def home_keyboard():
-    return ReplyKeyboardMarkup([_HOME_ROW.copy()], resize_keyboard=True)
+    return ReplyKeyboardMarkup([[_btn(c) for c in _HOME_ROW]], resize_keyboard=True)
 
 
 def discount_prompt_keyboard() -> InlineKeyboardMarkup:
@@ -63,8 +64,8 @@ def discount_prompt_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("🎟️ بله، کد دارم", callback_data="disc|yes"),
-                InlineKeyboardButton("⏭️ نه، ادامه بدون تخفیف", callback_data="disc|no"),
+                InlineKeyboardButton(_btn("🎟️ بله، کد دارم"), callback_data="disc|yes"),
+                InlineKeyboardButton(_btn("⏭️ نه، ادامه بدون تخفیف"), callback_data="disc|no"),
             ]
         ]
     )
@@ -78,8 +79,8 @@ def discount_choice_keyboard() -> ReplyKeyboardMarkup:
     """
     return ReplyKeyboardMarkup(
         [
-            [CHOICE_HAVE_CODE, CHOICE_NO_CODE],
-            [CANCEL_BUTTON],
+            [_btn(CHOICE_HAVE_CODE), _btn(CHOICE_NO_CODE)],
+            [_btn(CANCEL_BUTTON)],
         ],
         resize_keyboard=True,
     )
@@ -89,8 +90,8 @@ def discount_entry_keyboard() -> ReplyKeyboardMarkup:
     """Shown while a discount code is awaited: explicit skip and cancel rows."""
     return ReplyKeyboardMarkup(
         [
-            ["⏭️ ادامه بدون تخفیف"],
-            [CANCEL_BUTTON],
+            [_btn("⏭️ ادامه بدون تخفیف")],
+            [_btn(CANCEL_BUTTON)],
         ],
         resize_keyboard=True,
     )
@@ -106,9 +107,9 @@ def payment_keyboard(public_url: str | None, order_id: int, is_admin: bool) -> I
     """
     buttons: list[list[InlineKeyboardButton]] = []
     if public_url:
-        buttons.append([InlineKeyboardButton("💳 پرداخت با زرین‌پال", url=public_url)])
+        buttons.append([InlineKeyboardButton(_btn("💳 پرداخت با زرین‌پال"), url=public_url)])
     if is_admin:
         buttons.append(
-            [InlineKeyboardButton("✅ تایید رایگان (ادمین)", callback_data=f"free|{order_id}")]
+            [InlineKeyboardButton(_btn("✅ تایید رایگان (ادمین)"), callback_data=f"free|{order_id}")]
         )
     return InlineKeyboardMarkup(buttons)

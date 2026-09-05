@@ -17,6 +17,7 @@ from handlers.buy import (
     renew_order,
 )
 from models import Order
+from rtl import rtl
 from vpn_service import VPNPanelError, VPNPanelService
 
 log = logging.getLogger(__name__)
@@ -29,17 +30,17 @@ def _is_admin(update: Update) -> bool:
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /approve <order_id>"""
     if not _is_admin(update):
-        await update.message.reply_text("⛔ دسترسی ندارید.")
+        await update.message.reply_text(rtl("⛔ دسترسی ندارید."))
         return
 
     if not context.args:
-        await update.message.reply_text("استفاده: /approve <شماره سفارش>")
+        await update.message.reply_text(rtl("استفاده: /approve <شماره سفارش>"))
         return
 
     try:
         order_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("❌ شماره سفارش نامعتبر است.")
+        await update.message.reply_text(rtl("❌ شماره سفارش نامعتبر است."))
         return
 
     async with async_session() as session:
@@ -49,11 +50,11 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order = result.scalar_one_or_none()
 
         if not order:
-            await update.message.reply_text(f"❌ سفارش #{order_id} یافت نشد.")
+            await update.message.reply_text(rtl(f"❌ سفارش #{order_id} یافت نشد."))
             return
 
         if order.status == "approved":
-            await update.message.reply_text(f"⚠️ سفارش #{order_id} قبلاً تأیید شده است.")
+            await update.message.reply_text(rtl(f"⚠️ سفارش #{order_id} قبلاً تأیید شده است."))
             return
 
         try:
@@ -63,18 +64,18 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 panel = await approve_order(session, order)
         except OrderAlreadyApproved:
             await update.message.reply_text(
-                f"⚠️ سفارش #{order_id} هم‌اکنون توسط شخص دیگری تأیید شد."
+                rtl(f"⚠️ سفارش #{order_id} هم‌اکنون توسط شخص دیگری تأیید شد.")
             )
             return
         except OrderNotApprovable as exc:
             await update.message.reply_text(
-                f"⚠️ سفارش #{order_id} قابل تأیید نیست.\n<code>{escape(str(exc))}</code>",
+                rtl(f"⚠️ سفارش #{order_id} قابل تأیید نیست.\n<code>{escape(str(exc))}</code>"),
                 parse_mode="HTML",
             )
             return
         except VPNPanelError as exc:
             await update.message.reply_text(
-                f"❌ خطای سرور — سفارش #{order_id} تأیید نشد.\n<code>{escape(str(exc))}</code>",
+                rtl(f"❌ خطای سرور — سفارش #{order_id} تأیید نشد.\n<code>{escape(str(exc))}</code>"),
                 parse_mode="HTML",
             )
             return
@@ -82,9 +83,11 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         package_label = escape(order.package_label)
         config_block = format_vpn_config(panel["links"])
         await update.message.reply_text(
-            f"✅ سفارش #{order_id} تأیید شد.\n"
-            f"📦 {package_label} | {order.duration_days} روز\n"
-            f"{config_block}",
+            rtl(
+                f"✅ سفارش #{order_id} تأیید شد.\n"
+                f"📦 {package_label} | {order.duration_days} روز\n"
+                f"{config_block}"
+            ),
             parse_mode="HTML",
         )
 
@@ -92,7 +95,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 chat_id=order.user.telegram_id,
-                text=(
+                text=rtl(
                     f"🎉 <b>سفارش #{order_id} شما تأیید شد!</b>\n\n"
                     f"📦 پکیج: {package_label}\n"
                     f"{config_block}\n\n"
@@ -112,7 +115,7 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /pending — list all pending orders"""
     if not _is_admin(update):
-        await update.message.reply_text("⛔ دسترسی ندارید.")
+        await update.message.reply_text(rtl("⛔ دسترسی ندارید."))
         return
 
     async with async_session() as session:
@@ -126,7 +129,7 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
         orders = result.scalars().all()
 
     if not orders:
-        await update.message.reply_text("📋 سفارش در انتظار تأییدی وجود ندارد.")
+        await update.message.reply_text(rtl("📋 سفارش در انتظار تأییدی وجود ندارد."))
         return
 
     lines = ["📋 <b>سفارش‌های در انتظار تأیید:</b>\n"]
@@ -136,7 +139,7 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{escape(o.package_label)} | {o.amount_toomans:,} تومان | "
             f"{o.created_at.strftime('%Y-%m-%d %H:%M')}"
         )
-    text = "\n".join(lines)
+    text = rtl("\n".join(lines))
     if len(text) > 4000:
         text = text[:3990] + "\n… (truncated, 50 shown)"
     await update.message.reply_text(text, parse_mode="HTML")
@@ -145,11 +148,11 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /stats — show server stats"""
     if not _is_admin(update):
-        await update.message.reply_text("⛔ دسترسی ندارید.")
+        await update.message.reply_text(rtl("⛔ دسترسی ندارید."))
         return
 
     status = await VPNPanelService.get_server_status()
-    text = (
+    text = rtl(
         "📊 <b>وضعیت سرور</b>\n\n"
         f"🖥 پنل: {escape(status['server'])}\n"
         f"🟢 وضعیت: {escape(str(status['status']))}\n"

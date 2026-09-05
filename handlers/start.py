@@ -4,6 +4,8 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from keyboards import main_menu_keyboard
+from rtl import rtl, strip_bidi
+from rtl import user as _rtl_user
 
 
 async def _abort_pending_if_any(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -19,6 +21,7 @@ async def _abort_pending_if_any(update: Update, context: ContextTypes.DEFAULT_TY
     # Don't interfere with explicit cancel flow
     try:
         txt = (update.effective_message.text or "").strip() if update.effective_message else ""
+        txt = strip_bidi(txt)
     except Exception:
         txt = ""
     if txt in ("❌ انصراف", "❌ Cancel"):
@@ -30,8 +33,10 @@ async def _abort_pending_if_any(update: Update, context: ContextTypes.DEFAULT_TY
         if cancelled:
             ids_str = ", #".join(str(i) for i in cancelled)
             await update.effective_message.reply_text(
-                f"❌ سفارش #{ids_str} به‌صورت خودکار لغو شد.\n"
-                "💡 اگر پرداختی انجام شده باشد، مبلغ به‌صورت خودکار بازگردانده می‌شود.",
+                rtl(
+                    f"❌ سفارش #{ids_str} به‌صورت خودکار لغو شد.\n"
+                    "💡 اگر پرداختی انجام شده باشد، مبلغ به‌صورت خودکار بازگردانده می‌شود."
+                ),
                 parse_mode="HTML",
                 reply_markup=main_menu_keyboard(),
             )
@@ -42,8 +47,8 @@ async def _abort_pending_if_any(update: Update, context: ContextTypes.DEFAULT_TY
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _abort_pending_if_any(update, context)
     user = update.effective_user
-    welcome_text = (
-        f"👋 سلام {escape(user.first_name)} عزیز!\n\n"
+    welcome_text = rtl(
+        f"👋 سلام {_rtl_user(escape(user.first_name))} عزیز!\n\n"
         "<b>واردن‌پروکسی</b> — اینترنتی آزاد و امن.\n\n"
         "🛒 <b>خرید اشتراک</b> — انتخاب پلن و تحویل فوری کانفیگ\n"
         "👤 <b>پروفایل و اشتراک‌های من</b> — اشتراک‌ها و کانفیگ‌های فعال\n"
@@ -56,7 +61,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _abort_pending_if_any(update, context)
-    text = (
+    text = rtl(
         "ℹ️ <b>راهنما و پشتیبانی</b>\n\n"
         "🛒 برای خرید، <b>خرید اشتراک</b> را انتخاب کنید.\n"
         "💳 پس از پرداخت در زرین‌پال، اشتراک بلافاصله فعال و کانفیگ تحویل داده می‌شود.\n"
