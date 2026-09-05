@@ -88,13 +88,11 @@ prompt_var() {
         # Trim surrounding whitespace without mangling the value (no xargs)
         input="${input#"${input%%[![:space:]]*}"}"
         input="${input%"${input##*[![:space:]]}"}"
-        # Block newlines and control chars; other chars are safely escaped via %q on write, so allow URL-safe and common values.
+        # Block newlines only; bash variables cannot hold NUL bytes (and a
+        # literal $'\x00' pattern is an empty string that matches everything),
+        # and every other character is safely escaped via %q on write.
         if [[ "$input" == *$'\n'* || "$input" == *$'\r'* ]]; then
             err "Value must not contain newlines."
-            continue
-        fi
-        if [[ "$input" == *$'\x00'* ]]; then
-            err "Value contains null bytes."
             continue
         fi
         if [[ "$required" == "true" ]] && [[ -z "$input" ]]; then

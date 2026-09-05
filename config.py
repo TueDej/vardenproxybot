@@ -105,7 +105,11 @@ class Config:
         self.admin_panel_pass = os.getenv("ADMIN_PANEL_PASS", self.admin_panel_pass)
 
         # Lite sub server (public /zub/ links; default: ZARINPAL_CALLBACK_URL origin)
-        self.sub_base_url = os.getenv("SUB_BASE_URL", "").rstrip("/")
+        # Accept a bare host (consumer.varden.ir) — normalize to https://
+        _sub_raw = os.getenv("SUB_BASE_URL", "").strip().rstrip("/")
+        if _sub_raw and "://" not in _sub_raw:
+            _sub_raw = f"https://{_sub_raw}"
+        self.sub_base_url = _sub_raw
 
         # 3x-ui panel settings
         self.panel_url = os.getenv("PANEL_URL", "").rstrip("/")
