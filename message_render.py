@@ -54,10 +54,17 @@ def format_links_block(links: list[str]) -> str:
 
 
 def format_sub_block(sub_url: str) -> str:
-    """Public subscription URL block — import once, auto-refreshes quota/expiry."""
+    """Public subscription URL block — import once, auto-refreshes quota/expiry.
+
+    A trailing newline inside <pre> makes it a two-line block: Telegram
+    Android renders single-line pre blocks as bare chips without the
+    Copy button; clients trim the newline when the URL is pasted.
+    """
     if not sub_url:
         return ""
-    return _rtl(f"🌐 <b>لینک اشتراک (آپدیت خودکار):</b>\n<pre><code>{escape(sub_url)}</code></pre>")
+    return _rtl(
+        f"🌐 <b>لینک اشتراک (آپدیت خودکار):</b>\n<pre><code>{escape(sub_url)}\n</code></pre>"
+    )
 
 
 def format_product_message(
@@ -69,11 +76,14 @@ def format_product_message(
         remaining = (expiry - now).days
         expiry_line = f"⏳ انقضا: {expiry.strftime('%Y-%m-%d')} ({remaining} روز باقی‌مانده)"
     online_tag = " 🟢 <i>آنلاین</i>" if c["email"] in online_emails else ""
-    links_block = format_links_block(c["links"])
-    suffix = f"\n{links_block}" if links_block else ""
+    # Sub link first — it's the one users import; raw configs stay below.
     sub_block = format_sub_block(_config.sub_url(str(c.get("sub_id") or "")))
+    links_block = format_links_block(c["links"])
+    suffix = ""
     if sub_block:
         suffix += f"\n\n{sub_block}"
+    if links_block:
+        suffix += f"\n\n{links_block}"
     # One fact per line: mixing LTR ("20GB"), digits and Persian on a single
     # line lets the bidi algorithm reorder them (📦 20GB | 2 دستگاه bug).
     return _rtl(
