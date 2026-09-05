@@ -56,14 +56,17 @@ def format_links_block(links: list[str]) -> str:
 def format_sub_block(sub_url: str) -> str:
     """Public subscription URL block — import once, auto-refreshes quota/expiry.
 
-    A trailing newline inside <pre> makes it a two-line block: Telegram
-    Android renders single-line pre blocks as bare chips without the
-    Copy button; clients trim the newline when the URL is pasted.
+    Telegram renders short single-line code blocks as compact chips:
+    shrink-to-fit width on Desktop, no Copy button on Android. Pad the
+    line so the block wraps to full width and gets the regular code
+    block treatment (same as the config links). The trailing spaces are
+    trimmed by VPN apps when the URL is pasted/imported.
     """
     if not sub_url:
         return ""
+    padded = sub_url.ljust(80)
     return _rtl(
-        f"🌐 <b>لینک اشتراک (آپدیت خودکار):</b>\n<pre><code>{escape(sub_url)}\n</code></pre>"
+        f"🌐 <b>لینک اشتراک (آپدیت خودکار):</b>\n<pre><code>{escape(padded)}</code></pre>"
     )
 
 
