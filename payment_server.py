@@ -453,7 +453,10 @@ async def handle_admin_stats(request: web.Request) -> web.Response:
             await session.execute(select(Order.status, func.count(Order.id)).group_by(Order.status))
         ).all()
         by_status = {row[0]: row[1] for row in status_rows}
-        # total revenue approved only, excluding gifts (amount 0 or is_gift)
+        # Total revenue: approved + paid only. payment_ref_id is set from the
+        # gateway verify response, so manual approvals (/approve, free-confirm)
+        # and gifts never count — only real money. "provisioning" also counts:
+        # money was captured, provisioning just hasn't finished.
         # Gracefully handle DBs where is_gift column hasn't been migrated yet (UndefinedColumn)
         try:
             total_revenue = (
@@ -462,6 +465,7 @@ async def handle_admin_stats(request: web.Request) -> web.Response:
                         and_(
                             Order.status == "approved",
                             Order.amount_toomans > 0,
+                            Order.payment_ref_id.is_not(None),
                             or_(Order.is_gift == False, Order.is_gift.is_(None)),  # type: ignore[comparison-overlap]
                         )
                     )
@@ -486,7 +490,11 @@ async def handle_admin_stats(request: web.Request) -> web.Response:
                 total_revenue = (
                     await session.execute(
                         select(func.coalesce(func.sum(Order.amount_toomans), 0)).where(
-                            and_(Order.status == "approved", Order.amount_toomans > 0)
+                            and_(
+                                Order.status == "approved",
+                                Order.amount_toomans > 0,
+                                Order.payment_ref_id.is_not(None),
+                            )
                         )
                     )
                 ).scalar() or 0

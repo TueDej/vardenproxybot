@@ -20,7 +20,7 @@ from html import escape
 
 from config import config as _config
 from rtl import rtl as _rtl
-from vpn_service import VPNPanelService, build_expiry_ms
+from vpn_service import VPNPanelService, build_expiry_ms, client_used_bytes
 
 
 def expiry_dt(ms: int) -> datetime | None:
@@ -68,7 +68,7 @@ def format_product_message(
     # line lets the bidi algorithm reorder them (📦 20GB | 2 دستگاه bug).
     return _rtl(
         f"📦 {data_label(c['total_gb'])}\n"
-        f"📱 تعداد دستگاه: {c['limit_ip']}{online_tag}\n"
+        f"📱 تعداد دستگاه مجاز: {c['limit_ip']}{online_tag}\n"
         f"📊 حجم باقی‌مانده: {remaining_data_label(c['total_gb'], c.get('used_bytes'))}\n"
         f"{expiry_line}"
         f"{suffix}"
@@ -79,7 +79,7 @@ def format_expired_message(c: dict, expiry: datetime | None) -> str:
     when = expiry.strftime("%Y-%m-%d") if expiry else "نامشخص"
     return _rtl(
         f"⌛ <b>منقضی‌شده</b> — {data_label(c['total_gb'])}\n"
-        f"📱 تعداد دستگاه: {c['limit_ip']}\n"
+        f"📱 تعداد دستگاه مجاز: {c['limit_ip']}\n"
         f"📊 حجم باقی‌مانده: {remaining_data_label(c['total_gb'], c.get('used_bytes'))}\n"
         f"📅 پایان: {when}\n"
         "برای تمدید روی دکمه زیر بزنید یا گزینه 🛒 خرید اشتراک را انتخاب کنید."
@@ -89,7 +89,7 @@ def format_expired_message(c: dict, expiry: datetime | None) -> str:
 def format_disabled_message(c: dict, expiry: datetime | None) -> str:
     return _rtl(
         f"🚫 <b>غیرفعال</b> — {data_label(c['total_gb'])}\n"
-        f"📱 تعداد دستگاه: {c['limit_ip']}\n"
+        f"📱 تعداد دستگاه مجاز: {c['limit_ip']}\n"
         f"📊 حجم باقی‌مانده: {remaining_data_label(c['total_gb'], c.get('used_bytes'))}\n"
         f"⏳ انقضا: {expiry.strftime('%Y-%m-%d') if expiry else 'ندارد'}\n"
         "با پشتیبانی تماس بگیرید."
@@ -135,9 +135,7 @@ async def subscription_card(
                 limit_ip = int(info.get("limitIp", 0) or 0)
             with contextlib.suppress(TypeError, ValueError):
                 expiry_ms = int(info.get("expiryTime", expiry_ms) or expiry_ms)
-            if info.get("up") is not None or info.get("down") is not None:
-                with contextlib.suppress(TypeError, ValueError):
-                    used_bytes = max(0, int(info.get("up") or 0)) + max(0, int(info.get("down") or 0))
+            used_bytes = client_used_bytes(info)
         with contextlib.suppress(Exception):
             live_links = await VPNPanelService.get_client_links(email)
         with contextlib.suppress(Exception):

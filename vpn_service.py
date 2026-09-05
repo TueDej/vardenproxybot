@@ -46,6 +46,28 @@ def build_expiry_ms(duration_days: int) -> int:
     return int(expires.timestamp() * 1000)
 
 
+def client_used_bytes(obj: dict | None) -> int | None:
+    """Combined up+down bytes from a client payload's traffic record.
+
+    Per the panel API the counters live in a nested ``traffic`` object
+    (``{"up": …, "down": …}``, possibly null); very old payloads may carry
+    flat top-level ``up``/``down`` instead. Returns None when unreported so
+    callers show نامشخص instead of a fake full quota.
+    """
+    if not isinstance(obj, dict):
+        return None
+    traffic = obj.get("traffic")
+    if not isinstance(traffic, dict):
+        traffic = obj  # legacy flat shape
+    up, down = traffic.get("up"), traffic.get("down")
+    if up is None and down is None:
+        return None
+    try:
+        return max(0, int(up or 0)) + max(0, int(down or 0))
+    except (TypeError, ValueError):
+        return None
+
+
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "::"}
 
 
@@ -391,14 +413,9 @@ class VPNPanelService:
                     cls.get_client_links(email),
                     cls.get_subscription_links(sub_id),
                 )
-            # Panel traffic counters (up/down bytes); None when the panel
-            # doesn't report them so the UI shows نامشخص instead of a lie.
-            used_bytes: int | None = None
-            if c.get("up") is not None or c.get("down") is not None:
-                try:
-                    used_bytes = max(0, int(c.get("up") or 0)) + max(0, int(c.get("down") or 0))
-                except (TypeError, ValueError):
-                    used_bytes = None
+            # Panel traffic counters (nested traffic.up/down); None when the
+            # panel doesn't report them so the UI shows نامشخص instead of a lie.
+            used_bytes = client_used_bytes(c)
             return {
                 "email": email,
                 "sub_id": sub_id,
