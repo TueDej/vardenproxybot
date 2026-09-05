@@ -82,18 +82,18 @@ async function loadOrders() {
       .map(
         (o) => `
       <tr>
-        <td><code>#${o.id}</code></td>
-        <td>
+        <td data-label="Order"><code>#${o.id}</code></td>
+        <td data-label="User">
           <div>${o.first_name ? escapeHtml(o.first_name) : "—"} <span class="muted">${o.username ? "@" + escapeHtml(o.username) : ""}</span></div>
           <div class="muted"><code>${o.telegram_id || "—"}</code></div>
         </td>
-        <td>${escapeHtml(o.package_label)}</td>
-        <td>${fmtAmount(o.amount_toomans)}</td>
-        <td>${pill(o.status)}</td>
-        <td>${o.payment_ref_id ? `<div class="cell-copy"><code>${escapeHtml(o.payment_ref_id)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(o.payment_ref_id)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></div>` : '<span class="muted">—</span>'}</td>
-        <td>${o.payment_authority ? `<div class="cell-copy"><code title="${escapeAttr(o.payment_authority)}">${escapeHtml(o.payment_authority)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(o.payment_authority)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></div>` : '<span class="muted">—</span>'}</td>
-        <td>${o.panel_email ? `<div class="cell-copy"><code title="${escapeAttr(o.panel_email)}">${escapeHtml(o.panel_email)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(o.panel_email)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></div>` : '<span class="muted">—</span>'}</td>
-        <td>${fmtDate(o.created_at)}</td>
+        <td data-label="Package">${escapeHtml(o.package_label)}</td>
+        <td data-label="Amount">${fmtAmount(o.amount_toomans)}</td>
+        <td data-label="Status">${pill(o.status)}</td>
+        <td data-label="Ref ID">${o.payment_ref_id ? `<div class="cell-copy"><code>${escapeHtml(o.payment_ref_id)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(o.payment_ref_id)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></div>` : '<span class="muted">—</span>'}</td>
+        <td data-label="Authority">${o.payment_authority ? `<div class="cell-copy"><code title="${escapeAttr(o.payment_authority)}">${escapeHtml(o.payment_authority)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(o.payment_authority)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></div>` : '<span class="muted">—</span>'}</td>
+        <td data-label="Panel Email">${o.panel_email ? `<div class="cell-copy"><code title="${escapeAttr(o.panel_email)}">${escapeHtml(o.panel_email)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(o.panel_email)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></div>` : '<span class="muted">—</span>'}</td>
+        <td data-label="Created">${fmtDate(o.created_at)}</td>
       </tr>
     `
       )
@@ -123,12 +123,12 @@ async function loadUsers() {
       .map(
         (u) => `
       <tr>
-        <td><code>${u.id}</code></td>
-        <td><code>${u.telegram_id}</code></td>
-        <td>${u.username ? "@" + escapeHtml(u.username) : "—"}</td>
-        <td>${escapeHtml(u.first_name || "—")}</td>
-        <td>${u.order_count}</td>
-        <td>${fmtDate(u.created_at)}</td>
+        <td data-label="ID"><code>${u.id}</code></td>
+        <td data-label="Telegram ID"><code>${u.telegram_id}</code></td>
+        <td data-label="Username">${u.username ? "@" + escapeHtml(u.username) : "—"}</td>
+        <td data-label="Name">${escapeHtml(u.first_name || "—")}</td>
+        <td data-label="Orders">${u.order_count}</td>
+        <td data-label="Joined">${fmtDate(u.created_at)}</td>
       </tr>
     `
       )
@@ -455,13 +455,13 @@ async function loadDiscounts() {
           : `<button type="button" class="btn sm" onclick="deleteDiscount(${c.id})">${icon("trash-bin")}<span>Delete</span></button>`;
         return `
         <tr>
-          <td><code>${escapeHtml(c.code)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(c.code)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></td>
-          <td>${c.discount_percent}%</td>
-          <td>${status}</td>
-          <td>${usedBy}</td>
-          <td>${usedAt}</td>
-          <td>${created}</td>
-          <td>${actions}</td>
+          <td data-label="Code"><code>${escapeHtml(c.code)}</code><button type="button" class="copy" title="Copy" data-copy="${escapeAttr(c.code)}" onclick="copyText(this.dataset.copy)">${icon("clipboard-copy")}</button></td>
+          <td data-label="Percent">${c.discount_percent}%</td>
+          <td data-label="Status">${status}</td>
+          <td data-label="Used by">${usedBy}</td>
+          <td data-label="Used at">${usedAt}</td>
+          <td data-label="Created">${created}</td>
+          <td data-label="Actions">${actions}</td>
         </tr>`;
       })
       .join("");
@@ -704,12 +704,12 @@ async function loadMessagesLog(page=1) {
     }
     tbody.innerHTML = data.items.map(l=>`
       <tr>
-        <td>${fmtDate(l.created_at)}</td>
-        <td><span class="pill ${l.kind}">${escapeHtml(l.kind)}</span></td>
-        <td><span class="pill ${l.status}">${escapeHtml(l.status)}</span></td>
-        <td>${l.filter_json ? escapeHtml(JSON.stringify(l.filter_json).slice(0,60)) : l.panel_email ? escapeHtml(l.panel_email) : "—"} <span class="muted">total ${l.total}</span></td>
-        <td class="muted col-preview">${escapeHtml(l.text_html||"—")}</td>
-        <td class="muted">${l.sent}/${l.total} ${l.failed?`<span class="text-err">${l.failed} failed</span>`:""}</td>
+        <td data-label="At">${fmtDate(l.created_at)}</td>
+        <td data-label="Kind"><span class="pill ${l.kind}">${escapeHtml(l.kind)}</span></td>
+        <td data-label="Status"><span class="pill ${l.status}">${escapeHtml(l.status)}</span></td>
+        <td data-label="To">${l.filter_json ? escapeHtml(JSON.stringify(l.filter_json).slice(0,60)) : l.panel_email ? escapeHtml(l.panel_email) : "—"} <span class="muted">total ${l.total}</span></td>
+        <td data-label="Preview" class="muted col-preview">${escapeHtml(l.text_html||"—")}</td>
+        <td data-label="Sent" class="muted">${l.sent}/${l.total} ${l.failed?`<span class="text-err">${l.failed} failed</span>`:""}</td>
       </tr>
     `).join("");
     if (pag) {
@@ -805,7 +805,6 @@ function switchTab(tab) {
   $("#packages-panel").classList.toggle("hidden", tab !== "packages");
   $("#discounts-panel").classList.toggle("hidden", tab !== "discounts");
   $("#messages-panel").classList.toggle("hidden", tab !== "messages");
-  $("#page-title").textContent = tab.charAt(0).toUpperCase() + tab.slice(1);
   document.querySelector("#toolbar-orders").style.display = tab === "packages" || tab === "discounts" || tab === "messages" ? "none" : "flex";
   if (tab === "orders") loadOrders();
   else if (tab === "users") loadUsers();

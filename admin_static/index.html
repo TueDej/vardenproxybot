@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/admin/static/style.css?v=3">
+<link rel="stylesheet" href="/admin/static/style.css?v=5">
 </head>
 <body>
 <div class="layout" id="layout">
@@ -35,18 +35,6 @@
   </aside>
 
   <main class="main">
-    <header class="topbar">
-      <div class="top-status">
-        <span class="status-dot"></span>bot:online
-        <span class="top-latency">· 42ms</span>
-      </div>
-      <span class="env-tag">PRODUCTION</span>
-      <h1 class="top-title" id="page-title">Orders</h1>
-      <div class="spacer"></div>
-      <span id="auth-status" class="muted"></span>
-      <div class="top-admin" title="Admin">A</div>
-    </header>
-
     <section id="stats" class="stats-grid">
       <div class="stat">
         <div class="stat-icon"><span data-icon="receipt"></span></div>
@@ -290,8 +278,7 @@
         <div id="msg-preview-box" class="hidden"><div class="hint" id="msg-preview-inner"></div></div>
       </div>
 
-      <div class="card-block">
-        <div class="card-block-title"><span data-icon="clipboard-copy"></span>Recent sends</div>
+      <div class="panel">
         <div class="table-wrap">
           <table id="messages-log-table">
             <thead>

@@ -39,7 +39,7 @@
   --mono: "JetBrains Mono", ui-monospace, "IBM Plex Mono", Menlo, Consolas, monospace;
 }
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html { color-scheme: dark; }
 
 html, body {
@@ -110,7 +110,10 @@ code {
 .layout {
   display: grid;
   grid-template-columns: 216px 1fr;
+  /* 100dvh: on iOS landscape 100vh includes the area behind browser chrome,
+     leaving the bottom of .main unreachable. dvh tracks the real viewport. */
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -229,77 +232,7 @@ code {
 /* ── Main column ───────────────────────────────────────────── */
 /* min-width:0 — grid items default to min-width:auto, which lets a wide
    table force the whole column (and page) wider than the viewport. */
-.main { height: 100vh; overflow-y: auto; padding: 0 18px 24px; min-width: 0; }
-
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin: 0 -18px 14px;
-  padding: 9px 18px;
-  background: rgba(14, 17, 15, 0.92);
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid var(--border);
-}
-
-.top-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-/* status = small filled dot + label */
-.status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-  flex-shrink: 0;
-}
-.status-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
-.status-dot.err { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
-
-.top-latency { color: var(--accent-dim); }
-
-.env-tag {
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  padding: 3px 7px;
-  color: var(--accent-ink);
-  background: var(--accent);
-  border-radius: var(--radius-xs);
-  white-space: nowrap;
-}
-.env-tag.test { background: var(--warn); }
-
-.top-title { font-size: 15px; font-weight: 700; margin: 0; letter-spacing: 0.01em; }
-.top-title::before { content: "// "; color: var(--accent); font-family: var(--mono); font-weight: 400; }
-
-.top-admin {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  background: var(--pine);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius);
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-#auth-status { font-family: var(--mono); font-size: 11px; }
+.main { height: 100vh; height: 100dvh; overflow-y: auto; padding: 14px 18px 24px; min-width: 0; }
 
 /* ── Buttons ───────────────────────────────────────────────── */
 .btn {
@@ -558,7 +491,9 @@ input[type="date"] { color-scheme: dark; }
 }
 
 /* ── Tables ────────────────────────────────────────────────── */
-.table-wrap { overflow-x: auto; max-width: 100%; min-width: 0; }
+/* overscroll-behavior-x: when a table does scroll horizontally (packages
+   editor on phones), reaching its edge must not chain into page scroll. */
+.table-wrap { overflow-x: auto; max-width: 100%; min-width: 0; overscroll-behavior-x: contain; }
 table { width: 100%; max-width: 100%; border-collapse: collapse; }
 
 th {
@@ -589,6 +524,8 @@ tbody tr:last-child td { border-bottom: none; }
 td code { font-size: 11px; }
 #orders-table td:last-child, #users-table td:last-child { font-family: var(--mono); font-size: 11.5px; }
 #orders-table { min-width: 860px; }
+/* message log preview: keep the column readable, text ellipsized */
+.col-preview { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .cell-copy { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; }
 /* Long unbroken strings (ZarinPal authority, ref IDs, emails) must wrap
@@ -801,6 +738,8 @@ body > .box {
   }
 
   .sidebar-brand { height: 52px; padding: 0 12px; }
+  .brand-title { font-size: 14px; }
+  .brand-sub { display: none; }
 
   .sidebar-nav {
     flex-direction: row;
@@ -810,11 +749,12 @@ body > .box {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    overscroll-behavior-x: contain;
     border-bottom: 1px solid var(--border);
   }
   .sidebar-nav::-webkit-scrollbar { display: none; }
 
-  .nav-item { flex: 0 0 auto; height: 42px; padding: 0 14px; }
+  .nav-item { flex: 0 0 auto; height: 44px; padding: 0 14px; font-size: 12.5px; }
   .nav-item.active::before { left: 8px; right: 8px; top: auto; bottom: 0; width: auto; height: 2px; }
 
   .sidebar-footer {
@@ -828,23 +768,14 @@ body > .box {
   }
 
   /* main column */
-  .main { height: auto; overflow: visible; padding: 0 10px 24px; }
-
-  .topbar {
-    margin: 0 -10px 12px;
-    padding: 8px 10px;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  .top-latency, #auth-status { display: none; }
-  .top-title { font-size: 14px; }
+  .main { height: auto; overflow: visible; padding: 10px 10px 20px; }
 
   /* bigger touch targets; 16px input font avoids iOS focus zoom */
-  .btn { height: 38px; padding: 0 14px; }
-  .btn.sm { height: 32px; }
-  input, select { height: 38px; }
+  .btn { height: 40px; padding: 0 14px; }
+  .btn.sm { height: 34px; padding: 0 12px; }
+  input, select { height: 40px; }
   input, select, textarea { font-size: 16px; }
-  .search-box { height: 38px; }
+  .search-box { height: 40px; }
 
   /* stats: 2-up compact */
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px; }
@@ -867,27 +798,87 @@ body > .box {
   .card-block { padding: 12px; }
   .hint { font-size: 11px; }
 
-  /* tables scroll horizontally inside their panel */
-  .table-wrap { -webkit-overflow-scrolling: touch; max-width: 100%; }
-  th, td { padding: 8px 9px; }
-  td { font-size: 12px; }
-  /* narrower floor on phones: codes wrap now, so 620px fits all 9 columns */
-  #orders-table { min-width: 620px; }
-  .col-preview { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* ── data tables become stacked cards ─────────────────────
+     Horizontal scroll for a 9-column table inside a scrolling page
+     is unusable on touch. Each row renders as a card; each cell shows
+     its data-label above the value. The packages editor keeps a real
+     table (inputs + drag reorder need the grid). */
+  #orders-table, #users-table, #discounts-table, #messages-log-table {
+    display: block;
+    min-width: 0;
+  }
+  #orders-table thead, #users-table thead,
+  #discounts-table thead, #messages-log-table thead { display: none; }
+  #orders-table tbody, #users-table tbody,
+  #discounts-table tbody, #messages-log-table tbody { display: block; padding: 4px; }
+  #orders-table tr, #users-table tr,
+  #discounts-table tr, #messages-log-table tr {
+    display: block;
+    margin: 8px 4px;
+    padding: 2px 12px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  #orders-table tbody tr:hover, #users-table tbody tr:hover,
+  #discounts-table tbody tr:hover, #messages-log-table tbody tr:hover { background: var(--bg-raised); }
+  #orders-table td, #users-table td,
+  #discounts-table td, #messages-log-table td {
+    display: block;
+    padding: 7px 0;
+    border-bottom: none;
+  }
+  #orders-table td[data-label], #users-table td[data-label],
+  #discounts-table td[data-label], #messages-log-table td[data-label] {
+    padding: 7px 0 9px;
+    border-bottom: 1px solid var(--border);
+  }
+  #orders-table td:last-child, #users-table td:last-child,
+  #discounts-table td:last-child, #messages-log-table td:last-child { border-bottom: none; }
+  td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 1px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  /* cells without data-label (loading/empty colspan rows) render plain */
+  #orders-table td:not([data-label]), #users-table td:not([data-label]),
+  #discounts-table td:not([data-label]), #messages-log-table td:not([data-label]) { padding: 10px 2px; }
+  #orders-table td[data-label] code, #users-table td[data-label] code { font-size: 12px; }
+  .col-preview { max-width: none; overflow: visible; text-overflow: unset; white-space: normal; }
+
+  /* packages editor: keep the table, scroll it, fix iOS zoom on inputs */
+  #packages-table { min-width: 640px; }
+  #packages-table input { height: 36px; font-size: 16px; min-width: 96px; }
+
+  /* comfortable tap targets */
+  .copy { padding: 6px; margin: -2px; }
+  .copy .ico { height: 14px; }
+  .pagination { flex-wrap: wrap; gap: 8px; }
+  .pagination button { height: 36px; padding: 0 14px; }
 
   .packages-actions { flex-wrap: wrap; }
   .packages-actions .btn { flex: 1 1 auto; }
 
-  .pagination { flex-wrap: wrap; gap: 8px; }
   .footer { padding-bottom: 4px; }
 }
 
+/* narrow phones: tab strip gets cramped — icons only, evenly spread */
+@media (max-width: 560px) {
+  .sidebar-nav { justify-content: space-around; gap: 0; padding: 0 4px; overflow-x: visible; }
+  .nav-item { flex: 1 1 0; justify-content: center; padding: 0 6px; min-width: 0; }
+  .nav-item .nav-label { display: none; }
+  .nav-item > span:first-child { width: auto; }
+  .nav-item.active::before { left: 26%; right: 26%; }
+}
+
 @media (max-width: 480px) {
-  .main { padding: 0 8px 20px; }
-  .topbar { margin: 0 -8px 10px; padding: 8px; }
-  .top-status { font-size: 10px; }
-  .top-title { font-size: 13px; }
-  .env-tag { font-size: 9px; padding: 2px 6px; }
+  .main { padding: 8px 8px 20px; }
   .stats-grid { gap: 6px; }
   .stat { padding: 8px 9px; }
   .stat-value { font-size: 16px; }
@@ -895,4 +886,7 @@ body > .box {
   .toolbar select, .toolbar input[type="date"] { flex: 1 1 100%; }
   .row > .btn { flex: 1 1 100%; }
   .row > .btn + .feedback { flex-basis: 100%; }
+
+  #orders-table tr, #users-table tr,
+  #discounts-table tr, #messages-log-table tr { margin: 8px 2px; padding: 2px 10px; }
 }
